@@ -5,6 +5,7 @@ from pathlib import Path
 from pyap.core import AffinityDataset, Platform
 from pyap.readers.olink_csv import read_olink_csv
 from pyap.readers.olink_parquet import read_olink_parquet
+from pyap.readers.olink_xlsx import read_olink_xlsx
 from pyap.readers.somascan_adat import read_somascan_adat
 from pyap.readers.somascan_csv import read_somascan_csv
 
@@ -133,3 +134,18 @@ class TestSomascanCsvReader:
     def test_file_not_found_raises(self):
         with pytest.raises(FileNotFoundError):
             read_somascan_csv("nonexistent.csv")
+
+
+class TestOlinkXlsxReader:
+    @pytest.fixture
+    def olink_xlsx_path(self):
+        return Path(__file__).parent / "data" / "olink_sample.xlsx"
+
+    def test_returns_affinity_dataset(self, olink_xlsx_path):
+        ds = read_olink_xlsx(olink_xlsx_path)
+        assert isinstance(ds, AffinityDataset)
+
+    def test_samples_and_features(self, olink_xlsx_path):
+        ds = read_olink_xlsx(olink_xlsx_path)
+        assert len(ds.samples) == 2
+        assert len(ds.features) == 2
