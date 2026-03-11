@@ -37,12 +37,15 @@ Repository = "https://github.com/PRIDE-Archive/pyprideap"
 Issues = "https://github.com/PRIDE-Archive/pyprideap/issues"
 
 [project.optional-dependencies]
+plots = ["plotly>=5.0", "scikit-learn>=1.3"]
 dev = [
     "pytest>=7.0",
     "ruff>=0.4",
     "mypy>=1.10",
     "pandas-stubs>=2.0",
     "types-requests>=2.31",
+    "plotly>=5.0",
+    "scikit-learn>=1.3",
 ]
 
 [tool.ruff]
