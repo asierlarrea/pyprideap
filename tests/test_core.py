@@ -1,5 +1,4 @@
 import pandas as pd
-import pytest
 
 from pyap.core import AffinityDataset, Level, Platform, ValidationResult
 

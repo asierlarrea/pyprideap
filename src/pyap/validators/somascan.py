@@ -22,20 +22,24 @@ class SomaScanValidator:
         results = []
         for col in _REQUIRED_SAMPLE_COLS:
             if col not in ds.samples.columns:
-                results.append(ValidationResult(
-                    level=Level.ERROR,
-                    rule="somascan.schema.missing_sample_column",
-                    message=f"Missing required sample column: {col}",
-                    details={"column": col},
-                ))
+                results.append(
+                    ValidationResult(
+                        level=Level.ERROR,
+                        rule="somascan.schema.missing_sample_column",
+                        message=f"Missing required sample column: {col}",
+                        details={"column": col},
+                    )
+                )
         for col in _REQUIRED_FEATURE_COLS:
             if col not in ds.features.columns:
-                results.append(ValidationResult(
-                    level=Level.ERROR,
-                    rule="somascan.schema.missing_feature_column",
-                    message=f"Missing required feature column: {col}",
-                    details={"column": col},
-                ))
+                results.append(
+                    ValidationResult(
+                        level=Level.ERROR,
+                        rule="somascan.schema.missing_feature_column",
+                        message=f"Missing required feature column: {col}",
+                        details={"column": col},
+                    )
+                )
         return results
 
     def _check_rfu_positive(self, ds: AffinityDataset) -> list[ValidationResult]:
@@ -47,31 +51,37 @@ class SomaScanValidator:
             return []
         negative = values < 0
         if negative.any():
-            return [ValidationResult(
-                level=Level.ERROR,
-                rule="somascan.rfu.positive",
-                message=f"RFU values must be positive: {int(negative.sum())} negative values found",
-                details={"count": int(negative.sum()), "min": float(values.min())},
-            )]
+            return [
+                ValidationResult(
+                    level=Level.ERROR,
+                    rule="somascan.rfu.positive",
+                    message=f"RFU values must be positive: {int(negative.sum())} negative values found",
+                    details={"count": int(negative.sum()), "min": float(values.min())},
+                )
+            ]
         return []
 
     def _check_not_empty(self, ds: AffinityDataset) -> list[ValidationResult]:
         if ds.expression.empty:
-            return [ValidationResult(
-                level=Level.ERROR,
-                rule="somascan.expression.empty",
-                message="Expression matrix is empty — at least one data record required",
-            )]
+            return [
+                ValidationResult(
+                    level=Level.ERROR,
+                    rule="somascan.expression.empty",
+                    message="Expression matrix is empty — at least one data record required",
+                )
+            ]
         return []
 
     def _check_header_metadata(self, ds: AffinityDataset) -> list[ValidationResult]:
         results = []
         for key in _EXPECTED_HEADER_KEYS:
             if key not in ds.metadata:
-                results.append(ValidationResult(
-                    level=Level.WARNING,
-                    rule="somascan.metadata.missing_header",
-                    message=f"Missing expected ADAT header key: {key}",
-                    details={"key": key},
-                ))
+                results.append(
+                    ValidationResult(
+                        level=Level.WARNING,
+                        rule="somascan.metadata.missing_header",
+                        message=f"Missing expected ADAT header key: {key}",
+                        details={"key": key},
+                    )
+                )
         return results

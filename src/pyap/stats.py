@@ -44,17 +44,17 @@ def compute_stats(dataset: AffinityDataset) -> DatasetStats:
     samples_per_feature = expr.count(axis=0)
     detection_rate = non_nan / total_values if total_values > 0 else 0.0
 
-    sample_types = {}
+    sample_types: dict[str, int] = {}
     if "SampleType" in dataset.samples.columns:
-        sample_types = dataset.samples["SampleType"].value_counts().to_dict()
+        sample_types = {str(k): int(v) for k, v in dataset.samples["SampleType"].value_counts().items()}
 
-    panels = {}
+    panels: dict[str, int] = {}
     if "Panel" in dataset.features.columns:
-        panels = dataset.features["Panel"].value_counts().to_dict()
+        panels = {str(k): int(v) for k, v in dataset.features["Panel"].value_counts().items()}
 
-    qc_summary = {}
+    qc_summary: dict[str, int] = {}
     if "SampleQC" in dataset.samples.columns:
-        qc_summary = dataset.samples["SampleQC"].value_counts().to_dict()
+        qc_summary = {str(k): int(v) for k, v in dataset.samples["SampleQC"].value_counts().items()}
 
     flat = expr.values.flatten().astype(float)
     flat = flat[~np.isnan(flat)]

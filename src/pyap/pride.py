@@ -9,18 +9,18 @@ class PrideClient:
     def __init__(self, base_url: str = _BASE_URL):
         self.base_url = base_url
 
-    def get_project(self, accession: str) -> dict:
+    def get_project(self, accession: str) -> dict:  # type: ignore[type-arg]
         resp = requests.get(f"{self.base_url}/projects/{accession}")
         resp.raise_for_status()
-        return resp.json()
+        return resp.json()  # type: ignore[no-any-return]
 
-    def list_files(self, accession: str) -> list[dict]:
+    def list_files(self, accession: str) -> list[dict]:  # type: ignore[type-arg]
         resp = requests.get(
             f"{self.base_url}/files/byProject",
-            params={"accession": accession, "pageSize": 100},
+            params={"accession": accession, "pageSize": "100"},
         )
         resp.raise_for_status()
-        return resp.json()
+        return resp.json()  # type: ignore[no-any-return]
 
     def get_download_urls(self, accession: str) -> dict[str, str]:
         files = self.list_files(accession)

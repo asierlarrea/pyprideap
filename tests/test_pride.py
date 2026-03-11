@@ -49,7 +49,10 @@ class TestPrideClient:
             {
                 "fileName": "olink_npx.csv",
                 "publicFileLocations": [
-                    {"name": "FTP Protocol", "value": "ftp://ftp.pride.ebi.ac.uk/pride/data/archive/2025/03/PAD000001/olink_npx.csv"},
+                    {
+                        "name": "FTP Protocol",
+                        "value": "ftp://ftp.pride.ebi.ac.uk/pride/data/archive/2025/03/PAD000001/olink_npx.csv",
+                    },
                 ],
             },
         ]

@@ -1,28 +1,35 @@
 import numpy as np
 import pandas as pd
-import pytest
 
-from pyap.core import AffinityDataset, Level, Platform, ValidationResult
+from pyap.core import AffinityDataset, Level, Platform
 from pyap.validators.olink_explore import OlinkExploreValidator
+from pyap.validators.olink_target import OlinkTargetValidator
+from pyap.validators.somascan import SomaScanValidator
 
 
 def _make_olink_dataset(**overrides) -> AffinityDataset:
     defaults = {
         "platform": Platform.OLINK_EXPLORE,
-        "samples": pd.DataFrame({
-            "SampleID": ["S001", "S002"],
-            "SampleType": ["SAMPLE", "SAMPLE"],
-            "SampleQC": ["PASS", "PASS"],
-        }),
-        "features": pd.DataFrame({
-            "OlinkID": ["OID1", "OID2"],
-            "UniProt": ["P12345", "Q67890"],
-            "Panel": ["Inflammation", "Inflammation"],
-        }),
-        "expression": pd.DataFrame({
-            "OID1": [3.5, 4.1],
-            "OID2": [2.0, -0.5],
-        }),
+        "samples": pd.DataFrame(
+            {
+                "SampleID": ["S001", "S002"],
+                "SampleType": ["SAMPLE", "SAMPLE"],
+                "SampleQC": ["PASS", "PASS"],
+            }
+        ),
+        "features": pd.DataFrame(
+            {
+                "OlinkID": ["OID1", "OID2"],
+                "UniProt": ["P12345", "Q67890"],
+                "Panel": ["Inflammation", "Inflammation"],
+            }
+        ),
+        "expression": pd.DataFrame(
+            {
+                "OID1": [3.5, 4.1],
+                "OID2": [2.0, -0.5],
+            }
+        ),
         "metadata": {},
     }
     defaults.update(overrides)
@@ -54,11 +61,13 @@ class TestOlinkExploreValidator:
 
     def test_invalid_sample_qc_value(self):
         ds = _make_olink_dataset(
-            samples=pd.DataFrame({
-                "SampleID": ["S001"],
-                "SampleType": ["SAMPLE"],
-                "SampleQC": ["INVALID"],
-            }),
+            samples=pd.DataFrame(
+                {
+                    "SampleID": ["S001"],
+                    "SampleType": ["SAMPLE"],
+                    "SampleQC": ["INVALID"],
+                }
+            ),
         )
         results = OlinkExploreValidator().validate(ds)
         errors = [r for r in results if r.level == Level.ERROR]
@@ -66,11 +75,13 @@ class TestOlinkExploreValidator:
 
     def test_fail_qc_with_non_nan_npx_error(self):
         ds = _make_olink_dataset(
-            samples=pd.DataFrame({
-                "SampleID": ["S001"],
-                "SampleType": ["SAMPLE"],
-                "SampleQC": ["FAIL"],
-            }),
+            samples=pd.DataFrame(
+                {
+                    "SampleID": ["S001"],
+                    "SampleType": ["SAMPLE"],
+                    "SampleQC": ["FAIL"],
+                }
+            ),
             expression=pd.DataFrame({"OID1": [3.5]}),
         )
         results = OlinkExploreValidator().validate(ds)
@@ -79,11 +90,13 @@ class TestOlinkExploreValidator:
 
     def test_pass_qc_with_nan_npx_error(self):
         ds = _make_olink_dataset(
-            samples=pd.DataFrame({
-                "SampleID": ["S001"],
-                "SampleType": ["SAMPLE"],
-                "SampleQC": ["PASS"],
-            }),
+            samples=pd.DataFrame(
+                {
+                    "SampleID": ["S001"],
+                    "SampleType": ["SAMPLE"],
+                    "SampleQC": ["PASS"],
+                }
+            ),
             expression=pd.DataFrame({"OID1": [np.nan]}),
         )
         results = OlinkExploreValidator().validate(ds)
@@ -107,22 +120,23 @@ class TestOlinkExploreValidator:
         assert any("empty" in r.rule for r in errors)
 
 
-from pyap.validators.olink_target import OlinkTargetValidator
-
-
 def _make_olink_target_dataset(**overrides) -> AffinityDataset:
     defaults = {
         "platform": Platform.OLINK_TARGET,
-        "samples": pd.DataFrame({
-            "SampleID": ["S001", "S002"],
-            "SampleType": ["SAMPLE", "SAMPLE"],
-            "SampleQC": ["PASS", "PASS"],
-        }),
-        "features": pd.DataFrame({
-            "OlinkID": ["OID1"],
-            "UniProt": ["P12345"],
-            "Panel": ["Immuno-Oncology"],
-        }),
+        "samples": pd.DataFrame(
+            {
+                "SampleID": ["S001", "S002"],
+                "SampleType": ["SAMPLE", "SAMPLE"],
+                "SampleQC": ["PASS", "PASS"],
+            }
+        ),
+        "features": pd.DataFrame(
+            {
+                "OlinkID": ["OID1"],
+                "UniProt": ["P12345"],
+                "Panel": ["Immuno-Oncology"],
+            }
+        ),
         "expression": pd.DataFrame({"OID1": [3.5, 4.1]}),
         "metadata": {},
     }
@@ -147,11 +161,13 @@ class TestOlinkTargetValidator:
 
     def test_qc_consistency_checked(self):
         ds = _make_olink_target_dataset(
-            samples=pd.DataFrame({
-                "SampleID": ["S001"],
-                "SampleType": ["SAMPLE"],
-                "SampleQC": ["FAIL"],
-            }),
+            samples=pd.DataFrame(
+                {
+                    "SampleID": ["S001"],
+                    "SampleType": ["SAMPLE"],
+                    "SampleQC": ["FAIL"],
+                }
+            ),
             expression=pd.DataFrame({"OID1": [3.5]}),
         )
         results = OlinkTargetValidator().validate(ds)
@@ -159,26 +175,29 @@ class TestOlinkTargetValidator:
         assert any("qc_consistency" in r.rule for r in errors)
 
 
-from pyap.validators.somascan import SomaScanValidator
-
-
 def _make_somascan_dataset(**overrides) -> AffinityDataset:
     defaults = {
         "platform": Platform.SOMASCAN,
-        "samples": pd.DataFrame({
-            "SampleId": ["S001", "S002"],
-            "SampleType": ["Sample", "Sample"],
-        }),
-        "features": pd.DataFrame({
-            "SeqId": ["10000-1", "10001-2"],
-            "UniProt": ["P05231", "P01375"],
-            "Target": ["IL-6", "TNF"],
-            "Dilution": ["20", "0.5"],
-        }),
-        "expression": pd.DataFrame({
-            "SL000001": [1234.5, 1100.2],
-            "SL000002": [5678.9, 4567.8],
-        }),
+        "samples": pd.DataFrame(
+            {
+                "SampleId": ["S001", "S002"],
+                "SampleType": ["Sample", "Sample"],
+            }
+        ),
+        "features": pd.DataFrame(
+            {
+                "SeqId": ["10000-1", "10001-2"],
+                "UniProt": ["P05231", "P01375"],
+                "Target": ["IL-6", "TNF"],
+                "Dilution": ["20", "0.5"],
+            }
+        ),
+        "expression": pd.DataFrame(
+            {
+                "SL000001": [1234.5, 1100.2],
+                "SL000002": [5678.9, 4567.8],
+            }
+        ),
         "metadata": {"AssayVersion": "v4.1", "AssayType": "SomaScan"},
     }
     defaults.update(overrides)

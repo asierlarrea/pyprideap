@@ -1,6 +1,6 @@
-import pandas as pd
-import pytest
 from pathlib import Path
+
+import pytest
 
 from pyap.core import AffinityDataset, Platform
 from pyap.readers.olink_csv import read_olink_csv

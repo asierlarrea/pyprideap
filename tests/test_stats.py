@@ -3,26 +3,32 @@ import pandas as pd
 import pytest
 
 from pyap.core import AffinityDataset, Platform
-from pyap.stats import DatasetStats, compute_stats
+from pyap.stats import compute_stats
 
 
 def _make_dataset():
     return AffinityDataset(
         platform=Platform.OLINK_EXPLORE,
-        samples=pd.DataFrame({
-            "SampleID": ["S001", "S002", "S003"],
-            "SampleType": ["SAMPLE", "SAMPLE", "CONTROL"],
-            "SampleQC": ["PASS", "WARN", "PASS"],
-        }),
-        features=pd.DataFrame({
-            "OlinkID": ["OID1", "OID2", "OID3"],
-            "Panel": ["Inflammation", "Inflammation", "Oncology"],
-        }),
-        expression=pd.DataFrame({
-            "OID1": [3.5, 4.1, 0.1],
-            "OID2": [2.0, np.nan, 0.05],
-            "OID3": [5.6, 6.0, 0.2],
-        }),
+        samples=pd.DataFrame(
+            {
+                "SampleID": ["S001", "S002", "S003"],
+                "SampleType": ["SAMPLE", "SAMPLE", "CONTROL"],
+                "SampleQC": ["PASS", "WARN", "PASS"],
+            }
+        ),
+        features=pd.DataFrame(
+            {
+                "OlinkID": ["OID1", "OID2", "OID3"],
+                "Panel": ["Inflammation", "Inflammation", "Oncology"],
+            }
+        ),
+        expression=pd.DataFrame(
+            {
+                "OID1": [3.5, 4.1, 0.1],
+                "OID2": [2.0, np.nan, 0.05],
+                "OID3": [5.6, 6.0, 0.2],
+            }
+        ),
         metadata={},
     )
 

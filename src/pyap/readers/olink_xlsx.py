@@ -23,9 +23,7 @@ def read_olink_xlsx(path: str | Path) -> AffinityDataset:
     feature_cols = [c for c in df.columns if c in _FEATURE_COLS]
     features = df[feature_cols].drop_duplicates(subset=["OlinkID"]).reset_index(drop=True)
 
-    expression = df.pivot_table(
-        index="SampleID", columns="OlinkID", values="NPX", aggfunc="first"
-    )
+    expression = df.pivot_table(index="SampleID", columns="OlinkID", values="NPX", aggfunc="first")
     expression = expression.loc[samples["SampleID"].values].reset_index(drop=True)
 
     return AffinityDataset(
