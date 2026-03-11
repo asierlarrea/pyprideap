@@ -1,0 +1,215 @@
+"""Tests for LOD computation and analysis."""
+
+import numpy as np
+import pandas as pd
+import pytest
+
+from pyprideap.core import AffinityDataset, Platform
+from pyprideap.lod import (
+    _MIN_STD_FLOOR,
+    compute_lod_from_controls,
+    compute_lod_stats,
+    get_lod_values,
+    get_valid_proteins,
+)
+
+# Number of negative controls that satisfies the minimum (>=10)
+_N_CONTROLS = 12
+
+
+def _make_olink_dataset(
+    n_samples=None,
+    n_features=3,
+    sample_types=None,
+    qc_values=None,
+    lod_values=None,
+    expression_values=None,
+):
+    if n_samples is None:
+        n_samples = 5 + _N_CONTROLS  # 5 biological + 12 controls
+    if sample_types is None:
+        n_bio = n_samples - _N_CONTROLS
+        sample_types = ["Sample"] * n_bio + ["Negative"] * _N_CONTROLS
+    if qc_values is None:
+        qc_values = ["PASS"] * n_samples
+
+    samples = pd.DataFrame(
+        {
+            "SampleID": [f"S{i}" for i in range(n_samples)],
+            "SampleType": sample_types,
+            "SampleQC": qc_values,
+        }
+    )
+
+    feature_data = {
+        "OlinkID": [f"OID{i}" for i in range(n_features)],
+        "UniProt": [f"P{i}" for i in range(n_features)],
+        "Panel": ["PanelA"] * n_features,
+    }
+    if lod_values is not None:
+        feature_data["LOD"] = lod_values
+    features = pd.DataFrame(feature_data)
+
+    if expression_values is not None:
+        expression = pd.DataFrame(
+            expression_values,
+            columns=[f"OID{j}" for j in range(n_features)],
+        )
+    else:
+        rng = np.random.default_rng(42)
+        # Count actual negative controls from sample_types
+        n_ctrl = sum(1 for s in sample_types if s.lower() in {"negative", "negative control"})
+        n_bio = n_samples - n_ctrl
+        expr_data = np.empty((n_samples, n_features))
+        expr_data[:n_bio, :] = rng.normal(5.0, 2.0, size=(n_bio, n_features))
+        if n_ctrl > 0:
+            expr_data[n_bio:, :] = rng.normal(0.5, 0.3, size=(n_ctrl, n_features))
+        expression = pd.DataFrame(
+            expr_data,
+            columns=[f"OID{j}" for j in range(n_features)],
+        )
+
+    return AffinityDataset(
+        platform=Platform.OLINK_EXPLORE,
+        samples=samples,
+        features=features,
+        expression=expression,
+    )
+
+
+class TestComputeLodFromControls:
+    def test_computes_lod_from_negative_controls(self):
+        ds = _make_olink_dataset()
+        lod = compute_lod_from_controls(ds)
+        assert len(lod) == 3
+        assert all(np.isfinite(lod))
+        # LOD = median + max(0.2, 3*std) per Olink official method
+        for col in ds.expression.columns:
+            control_vals = ds.expression.iloc[-_N_CONTROLS:][col]
+            med = control_vals.median()
+            std = control_vals.std()
+            expected = med + max(_MIN_STD_FLOOR, 3 * std)
+            assert abs(lod[col] - expected) < 1e-10
+
+    def test_std_floor_applied(self):
+        """When std is very small, the 0.2 NPX floor kicks in."""
+        n_controls = 12
+        n_samples = 3 + n_controls
+        sample_types = ["Sample"] * 3 + ["Negative"] * n_controls
+        # All controls have identical values → std = 0
+        expr = [[5.0, 5.0, 5.0]] * 3 + [[1.0, 1.0, 1.0]] * n_controls
+        ds = _make_olink_dataset(
+            n_samples=n_samples,
+            sample_types=sample_types,
+            expression_values=expr,
+        )
+        lod = compute_lod_from_controls(ds)
+        # std=0 so floor of 0.2 applies: LOD = 1.0 + 0.2 = 1.2
+        for col in ds.expression.columns:
+            assert abs(lod[col] - 1.2) < 1e-10
+
+    def test_raises_without_sample_type(self):
+        ds = _make_olink_dataset()
+        ds.samples = ds.samples.drop(columns=["SampleType"])
+        with pytest.raises(ValueError, match="SampleType"):
+            compute_lod_from_controls(ds)
+
+    def test_raises_with_too_few_controls(self):
+        """Need at least 10 controls per Olink specification."""
+        ds = _make_olink_dataset(
+            n_samples=12,
+            sample_types=["Sample"] * 3 + ["Negative"] * 9,
+        )
+        with pytest.raises(ValueError, match="at least"):
+            compute_lod_from_controls(ds)
+
+
+class TestGetLodValues:
+    def test_extracts_lod_from_features(self):
+        ds = _make_olink_dataset(lod_values=[1.0, 2.0, 3.0])
+        lod = get_lod_values(ds)
+        assert lod is not None
+        assert len(lod) == 3
+        assert lod["OID0"] == 1.0
+        assert lod["OID2"] == 3.0
+
+    def test_returns_none_when_no_lod_column(self):
+        ds = _make_olink_dataset()
+        lod = get_lod_values(ds)
+        assert lod is None
+
+    def test_returns_none_when_all_lod_nan(self):
+        ds = _make_olink_dataset(lod_values=[np.nan, np.nan, np.nan])
+        lod = get_lod_values(ds)
+        assert lod is None
+
+
+class TestComputeLodStats:
+    def test_stats_with_lod_from_features(self):
+        n = 5 + _N_CONTROLS
+        ds = _make_olink_dataset(
+            lod_values=[2.0, 2.0, 2.0],
+            expression_values=([[5.0, 5.0, 5.0]] * 3 + [[1.0, 5.0, 1.0]] * 2 + [[0.5, 0.3, 0.4]] * _N_CONTROLS),
+        )
+        stats = compute_lod_stats(ds)
+        assert stats.lod_source == "features_table"
+        assert stats.n_assays_with_lod == 3
+        assert 0.0 < stats.above_lod_rate <= 1.0
+        assert len(stats.above_lod_per_sample) == n
+        assert "PanelA" in stats.above_lod_per_panel
+
+    def test_stats_computed_from_controls(self):
+        ds = _make_olink_dataset()
+        stats = compute_lod_stats(ds)
+        assert stats.lod_source == "computed_from_controls"
+        assert stats.n_assays_with_lod > 0
+
+    def test_stats_not_available(self):
+        ds = _make_olink_dataset(
+            n_samples=3,
+            sample_types=["Sample", "Sample", "Sample"],
+        )
+        stats = compute_lod_stats(ds)
+        assert stats.lod_source == "not_available"
+        assert stats.above_lod_rate == 0.0
+
+    def test_summary_string(self):
+        ds = _make_olink_dataset(lod_values=[2.0, 2.0, 2.0])
+        stats = compute_lod_stats(ds)
+        summary = stats.summary()
+        assert "LOD source" in summary
+        assert "above-LOD rate" in summary
+
+
+class TestGetValidProteins:
+    def test_returns_proteins_above_lod(self):
+        ds = _make_olink_dataset(
+            lod_values=[10.0, 2.0, 10.0],
+            expression_values=([[1.0, 5.0, 1.0]] * 5 + [[0.5, 0.3, 0.4]] * _N_CONTROLS),
+        )
+        valid = get_valid_proteins(ds)
+        # Only OID1 has NPX (5.0) > LOD (2.0)
+        assert "OID1" in valid
+        assert "OID0" not in valid
+        assert "OID2" not in valid
+
+    def test_excludes_fail_qc_samples(self):
+        n_bio = 5
+        ds = _make_olink_dataset(
+            lod_values=[2.0, 2.0, 2.0],
+            qc_values=["FAIL"] * n_bio + ["PASS"] * _N_CONTROLS,
+            expression_values=([[5.0, 5.0, 5.0]] * n_bio + [[0.5, 0.3, 0.4]] * _N_CONTROLS),
+        )
+        # All biological samples FAIL QC; only PASS samples are controls
+        # After filtering controls, no biological samples with PASS remain
+        valid = get_valid_proteins(ds)
+        assert valid == []
+
+    def test_returns_all_when_no_lod(self):
+        ds = _make_olink_dataset(
+            n_samples=3,
+            sample_types=["Sample", "Sample", "Sample"],
+        )
+        valid = get_valid_proteins(ds)
+        # No LOD available, returns all proteins with non-NaN values
+        assert len(valid) == 3

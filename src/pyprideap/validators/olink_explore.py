@@ -20,6 +20,7 @@ class OlinkExploreValidator:
         results.extend(self._check_qc_consistency(dataset))
         results.extend(self._check_npx_range(dataset))
         results.extend(self._check_not_empty(dataset))
+        results.extend(self._check_lod_present(dataset))
         return results
 
     def _check_schema(self, ds: AffinityDataset) -> list[ValidationResult]:
@@ -108,6 +109,26 @@ class OlinkExploreValidator:
                     message=f"NPX values outside expected log2 range [{_NPX_MIN}, {_NPX_MAX}]: "
                     f"{int(out_of_range.sum())} values out of range",
                     details={"count": int(out_of_range.sum()), "min": float(values.min()), "max": float(values.max())},
+                )
+            ]
+        return []
+
+    def _check_lod_present(self, ds: AffinityDataset) -> list[ValidationResult]:
+        if "LOD" not in ds.features.columns:
+            return [
+                ValidationResult(
+                    level=Level.WARNING,
+                    rule="olink.lod.missing",
+                    message="LOD column not found in features — LOD-based quality filtering will not be available",
+                )
+            ]
+        lod_values = pd.to_numeric(ds.features["LOD"], errors="coerce")
+        if lod_values.isna().all():
+            return [
+                ValidationResult(
+                    level=Level.WARNING,
+                    rule="olink.lod.empty",
+                    message="LOD column exists but all values are missing or non-numeric",
                 )
             ]
         return []
