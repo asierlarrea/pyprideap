@@ -49,13 +49,15 @@ def qc_report(dataset: AffinityDataset, output: str | Path) -> Path:
         if data is None:
             continue
         fig = renderer(data)
+        fig.update_layout(height=500)
         section_title = data.title
         section_id = key
         toc_items.append(f'<li><a href="#{section_id}">{section_title}</a></li>')
+        plot_html = fig.to_html(full_html=False, include_plotlyjs=False, default_height="500px")
         sections.append(
             f'<div id="{section_id}" style="margin-bottom:40px;">'
             f"<h2>{section_title}</h2>"
-            f"{fig.to_html(full_html=False, include_plotlyjs=False)}"
+            f"{plot_html}"
             f"</div>"
         )
 

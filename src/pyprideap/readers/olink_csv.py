@@ -7,7 +7,7 @@ import pandas as pd
 from pyprideap.core import AffinityDataset, Platform
 
 _SAMPLE_COLS = {"SampleID", "PlateID", "WellID", "SampleType", "SampleQC", "PlateQC"}
-_FEATURE_COLS = {"OlinkID", "UniProt", "Assay", "Panel", "LOD"}
+_FEATURE_COLS = {"OlinkID", "UniProt", "Assay", "Panel", "LOD", "MissingFreq"}
 _REQUIRED_COLS = {"SampleID", "OlinkID", "NPX"}
 
 

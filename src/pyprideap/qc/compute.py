@@ -137,9 +137,19 @@ def compute_distribution(dataset: AffinityDataset) -> DistributionData:
 
 
 def compute_missing_frequency(dataset: AffinityDataset) -> MissingFrequencyData:
-    """Per-assay missing frequency (fraction of samples with NaN)."""
-    numeric = dataset.expression.apply(pd.to_numeric, errors="coerce")
-    freq = numeric.isna().mean(axis=0).tolist()
+    """Per-assay missing frequency.
+
+    Uses the MissingFreq column from features metadata if available
+    (provided by Olink in NPX CSV). Otherwise falls back to computing
+    the NaN rate per feature from the expression matrix.
+    """
+    if "MissingFreq" in dataset.features.columns:
+        freq = pd.to_numeric(dataset.features["MissingFreq"], errors="coerce").fillna(0).tolist()
+    elif "MissingFreq" in dataset.metadata:
+        freq = list(dataset.metadata["MissingFreq"])
+    else:
+        numeric = dataset.expression.apply(pd.to_numeric, errors="coerce")
+        freq = numeric.isna().mean(axis=0).tolist()
     return MissingFrequencyData(missing_freq=freq)
 
 
