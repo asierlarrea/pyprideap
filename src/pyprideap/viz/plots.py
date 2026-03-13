@@ -22,9 +22,7 @@ def _import_plotly():
 
         return go
     except ImportError:
-        raise ImportError(
-            "Plotly is required for plotting. Install with: pip install pyprideap[plots]"
-        ) from None
+        raise ImportError("Plotly is required for plotting. Install with: pip install pyprideap[plots]") from None
 
 
 def boxplot(
@@ -83,14 +81,16 @@ def boxplot(
             for col in cols:
                 vals = numeric.loc[mask, col].dropna()
                 label = assay_map.get(str(col), str(col))
-                fig.add_trace(go.Box(
-                    y=vals,
-                    x=[label] * len(vals),
-                    name=str(grp),
-                    marker_color=colors[gi],
-                    legendgroup=str(grp),
-                    showlegend=col == cols[0],
-                ))
+                fig.add_trace(
+                    go.Box(
+                        y=vals,
+                        x=[label] * len(vals),
+                        name=str(grp),
+                        marker_color=colors[gi],
+                        legendgroup=str(grp),
+                        showlegend=col == cols[0],
+                    )
+                )
         fig.update_layout(boxmode="group")
     else:
         for col in cols:

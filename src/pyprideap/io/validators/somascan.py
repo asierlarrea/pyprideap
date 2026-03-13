@@ -83,35 +83,41 @@ class SomaScanValidator:
 
         nan_frac = float(ds.expression.isna().mean().mean())
         if nan_frac > 0.5:
-            results.append(ValidationResult(
-                level=Level.WARNING,
-                rule="somascan.expression.high_nan",
-                message=f"Expression matrix is {nan_frac:.0%} NaN "
-                        f"({n_samples} samples × {n_features} features). "
-                        f"Data may have been pivoted incorrectly or is very sparse.",
-                details={"nan_fraction": nan_frac, "n_samples": n_samples, "n_features": n_features},
-            ))
+            results.append(
+                ValidationResult(
+                    level=Level.WARNING,
+                    rule="somascan.expression.high_nan",
+                    message=f"Expression matrix is {nan_frac:.0%} NaN "
+                    f"({n_samples} samples × {n_features} features). "
+                    f"Data may have been pivoted incorrectly or is very sparse.",
+                    details={"nan_fraction": nan_frac, "n_samples": n_samples, "n_features": n_features},
+                )
+            )
 
         if n_samples == n_features and n_samples > 10:
-            results.append(ValidationResult(
-                level=Level.WARNING,
-                rule="somascan.expression.square_matrix",
-                message=f"Expression matrix is square ({n_samples} × {n_features}), "
-                        f"which is unusual. Verify sample and feature identifiers.",
-                details={"n_samples": n_samples, "n_features": n_features},
-            ))
+            results.append(
+                ValidationResult(
+                    level=Level.WARNING,
+                    rule="somascan.expression.square_matrix",
+                    message=f"Expression matrix is square ({n_samples} × {n_features}), "
+                    f"which is unusual. Verify sample and feature identifiers.",
+                    details={"n_samples": n_samples, "n_features": n_features},
+                )
+            )
 
         non_nan_per_sample = ds.expression.notna().sum(axis=1)
         median_non_nan = float(non_nan_per_sample.median())
         if n_features > 0 and median_non_nan / n_features < 0.1:
-            results.append(ValidationResult(
-                level=Level.WARNING,
-                rule="somascan.expression.sparse_samples",
-                message=f"Samples have very few measured values "
-                        f"(median {median_non_nan:.0f} of {n_features} features). "
-                        f"This may indicate a parsing issue.",
-                details={"median_non_nan": median_non_nan, "n_features": n_features},
-            ))
+            results.append(
+                ValidationResult(
+                    level=Level.WARNING,
+                    rule="somascan.expression.sparse_samples",
+                    message=f"Samples have very few measured values "
+                    f"(median {median_non_nan:.0f} of {n_features} features). "
+                    f"This may indicate a parsing issue.",
+                    details={"median_non_nan": median_non_nan, "n_features": n_features},
+                )
+            )
 
         return results
 

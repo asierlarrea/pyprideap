@@ -44,22 +44,31 @@ try:
 except PackageNotFoundError:
     __version__ = "0.0.0+unknown"
 
+
 # Lazy imports for optional-dependency modules
 def ttest(*args, **kwargs):
     from pyprideap.stats.differential import ttest as _ttest
+
     return _ttest(*args, **kwargs)
+
 
 def wilcoxon(*args, **kwargs):
     from pyprideap.stats.differential import wilcoxon as _wilcoxon
+
     return _wilcoxon(*args, **kwargs)
+
 
 def anova(*args, **kwargs):
     from pyprideap.stats.differential import anova as _anova
+
     return _anova(*args, **kwargs)
+
 
 def anova_posthoc(*args, **kwargs):
     from pyprideap.stats.differential import anova_posthoc as _anova_posthoc
+
     return _anova_posthoc(*args, **kwargs)
+
 
 __all__ = [
     "__version__",

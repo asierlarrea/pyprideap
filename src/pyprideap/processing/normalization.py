@@ -69,15 +69,10 @@ def bridge_normalize(
     ds2_samples = set(dataset2.expression.index)
     valid_bridge = [s for s in bridge_samples if s in ds1_samples and s in ds2_samples]
     if not valid_bridge:
-        raise ValueError(
-            "No bridge samples found in both datasets. "
-            f"Requested: {bridge_samples}"
-        )
+        raise ValueError(f"No bridge samples found in both datasets. Requested: {bridge_samples}")
 
     # Validate overlapping proteins
-    overlapping_proteins = dataset1.expression.columns.intersection(
-        dataset2.expression.columns
-    )
+    overlapping_proteins = dataset1.expression.columns.intersection(dataset2.expression.columns)
     if overlapping_proteins.empty:
         raise ValueError("No overlapping proteins between the two datasets.")
 
@@ -89,9 +84,7 @@ def bridge_normalize(
     # Apply adjustment to dataset2 (only overlapping columns are shifted;
     # non-overlapping columns in dataset2 are left as-is)
     adjusted_expression = dataset2.expression.copy()
-    adjusted_expression[overlapping_proteins] = (
-        adjusted_expression[overlapping_proteins].add(adjustment, axis=1)
-    )
+    adjusted_expression[overlapping_proteins] = adjusted_expression[overlapping_proteins].add(adjustment, axis=1)
 
     return replace(dataset2, expression=adjusted_expression)
 
@@ -131,10 +124,7 @@ def subset_normalize(
     ref_in_ds2 = [p for p in reference_proteins if p in dataset2.expression.columns]
     valid_ref = sorted(set(ref_in_ds1) & set(ref_in_ds2))
     if not valid_ref:
-        raise ValueError(
-            "None of the reference proteins were found in both datasets. "
-            f"Requested: {reference_proteins}"
-        )
+        raise ValueError(f"None of the reference proteins were found in both datasets. Requested: {reference_proteins}")
 
     # Per-protein adjustment: median across all samples in ds1 vs ds2
     median_ds1 = dataset1.expression[valid_ref].median(axis=0)
@@ -142,9 +132,7 @@ def subset_normalize(
     adjustment = median_ds1 - median_ds2
 
     adjusted_expression = dataset2.expression.copy()
-    adjusted_expression[valid_ref] = adjusted_expression[valid_ref].add(
-        adjustment, axis=1
-    )
+    adjusted_expression[valid_ref] = adjusted_expression[valid_ref].add(adjustment, axis=1)
 
     return replace(dataset2, expression=adjusted_expression)
 
@@ -174,21 +162,15 @@ def reference_median_normalize(
     if isinstance(reference_medians, dict):
         reference_medians = pd.Series(reference_medians)
 
-    proteins_to_adjust = dataset.expression.columns.intersection(
-        reference_medians.index
-    )
+    proteins_to_adjust = dataset.expression.columns.intersection(reference_medians.index)
     if proteins_to_adjust.empty:
-        raise ValueError(
-            "None of the reference median proteins were found in the dataset."
-        )
+        raise ValueError("None of the reference median proteins were found in the dataset.")
 
     current_medians = dataset.expression[proteins_to_adjust].median(axis=0)
     adjustment = reference_medians[proteins_to_adjust] - current_medians
 
     adjusted_expression = dataset.expression.copy()
-    adjusted_expression[proteins_to_adjust] = adjusted_expression[
-        proteins_to_adjust
-    ].add(adjustment, axis=1)
+    adjusted_expression[proteins_to_adjust] = adjusted_expression[proteins_to_adjust].add(adjustment, axis=1)
 
     return replace(dataset, expression=adjusted_expression)
 
@@ -273,15 +255,11 @@ def assess_bridgeability(
     ValueError
         If there are no overlapping proteins.
     """
-    overlapping_proteins = dataset1.expression.columns.intersection(
-        dataset2.expression.columns
-    )
+    overlapping_proteins = dataset1.expression.columns.intersection(dataset2.expression.columns)
     if overlapping_proteins.empty:
         raise ValueError("No overlapping proteins between the two datasets.")
 
-    common_samples = dataset1.expression.index.intersection(
-        dataset2.expression.index
-    )
+    common_samples = dataset1.expression.index.intersection(dataset2.expression.index)
 
     records: list[dict] = []
     for protein in overlapping_proteins:
@@ -294,18 +272,13 @@ def assess_bridgeability(
 
         # Correlation requires matched samples
         if len(common_samples) >= 3:
-            paired = pd.DataFrame(
-                {"a": vals1.reindex(common_samples), "b": vals2.reindex(common_samples)}
-            ).dropna()
+            paired = pd.DataFrame({"a": vals1.reindex(common_samples), "b": vals2.reindex(common_samples)}).dropna()
             correlation = float(paired["a"].corr(paired["b"])) if len(paired) >= 3 else np.nan
         else:
             correlation = np.nan
 
         bridgeable = (
-            not np.isnan(correlation)
-            and correlation > 0.7
-            and detection_rate_1 > 0.5
-            and detection_rate_2 > 0.5
+            not np.isnan(correlation) and correlation > 0.7 and detection_rate_1 > 0.5 and detection_rate_2 > 0.5
         )
 
         records.append(
@@ -371,9 +344,7 @@ def scale_analytes(
         )
 
     scaled_expression = dataset.expression.copy()
-    scaled_expression[matched] = scaled_expression[matched].multiply(
-        scalars[matched], axis=1
-    )
+    scaled_expression[matched] = scaled_expression[matched].multiply(scalars[matched], axis=1)
 
     return replace(dataset, expression=scaled_expression)
 

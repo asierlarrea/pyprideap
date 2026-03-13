@@ -25,42 +25,40 @@ if TYPE_CHECKING:
 # Lazy imports with user-friendly error messages
 # ---------------------------------------------------------------------------
 
+
 def _import_scipy_stats():
     try:
         from scipy import stats as _stats
+
         return _stats
     except ImportError:
-        raise ImportError(
-            "scipy is required for differential expression testing. "
-            "Install it with:  pip install scipy"
-        )
+        raise ImportError("scipy is required for differential expression testing. Install it with:  pip install scipy")
 
 
 def _import_multipletests():
     try:
         from statsmodels.stats.multitest import multipletests as _mt
+
         return _mt
     except ImportError:
-        raise ImportError(
-            "statsmodels is required for p-value adjustment. "
-            "Install it with:  pip install statsmodels"
-        )
+        raise ImportError("statsmodels is required for p-value adjustment. Install it with:  pip install statsmodels")
 
 
 def _import_tukeyhsd():
     try:
         from statsmodels.stats.multicomp import pairwise_tukeyhsd as _tk
+
         return _tk
     except ImportError:
         raise ImportError(
-            "statsmodels is required for Tukey HSD post-hoc tests. "
-            "Install it with:  pip install statsmodels"
+            "statsmodels is required for Tukey HSD post-hoc tests. Install it with:  pip install statsmodels"
         )
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _resolve_assay_map(dataset: AffinityDataset) -> dict[str, str]:
     """Return a mapping from protein/column id to Assay name.
@@ -104,8 +102,7 @@ def _validate_group_var(
     """
     if group_var not in dataset.samples.columns:
         raise ValueError(
-            f"group_var '{group_var}' not found in dataset.samples. "
-            f"Available columns: {list(dataset.samples.columns)}"
+            f"group_var '{group_var}' not found in dataset.samples. Available columns: {list(dataset.samples.columns)}"
         )
 
     groups = dataset.samples[group_var]
@@ -119,8 +116,7 @@ def _validate_group_var(
         )
     if n_levels < min_levels:
         raise ValueError(
-            f"group_var '{group_var}' must have at least {min_levels} "
-            f"unique non-NaN levels, but found {n_levels}."
+            f"group_var '{group_var}' must have at least {min_levels} unique non-NaN levels, but found {n_levels}."
         )
 
     return groups
@@ -140,6 +136,7 @@ def _bh_adjust(p_values: np.ndarray) -> np.ndarray:
 # ---------------------------------------------------------------------------
 # ttest
 # ---------------------------------------------------------------------------
+
 
 def ttest(
     dataset: AffinityDataset,
@@ -183,14 +180,14 @@ def ttest(
         if pair_id is not None:
             # Paired t-test: align by pair_id
             if pair_id not in dataset.samples.columns:
-                raise ValueError(
-                    f"pair_id '{pair_id}' not found in dataset.samples."
-                )
-            df_tmp = pd.DataFrame({
-                "val": vals,
-                "group": groups,
-                "pair": dataset.samples[pair_id],
-            }).dropna(subset=["val", "group", "pair"])
+                raise ValueError(f"pair_id '{pair_id}' not found in dataset.samples.")
+            df_tmp = pd.DataFrame(
+                {
+                    "val": vals,
+                    "group": groups,
+                    "pair": dataset.samples[pair_id],
+                }
+            ).dropna(subset=["val", "group", "pair"])
 
             pivot = df_tmp.pivot(index="pair", columns="group", values="val")
             pivot = pivot.dropna()
@@ -215,13 +212,15 @@ def ttest(
             stat, pval = scipy_stats.ttest_ind(a, b, equal_var=False)
             estimate = float(np.nanmean(a) - np.nanmean(b))
 
-        records.append({
-            "protein_id": protein_id,
-            "assay": assay_map.get(protein_id, None),
-            "estimate": estimate,
-            "statistic": float(stat),
-            "p_value": float(pval),
-        })
+        records.append(
+            {
+                "protein_id": protein_id,
+                "assay": assay_map.get(protein_id, None),
+                "estimate": estimate,
+                "statistic": float(stat),
+                "p_value": float(pval),
+            }
+        )
 
     result = pd.DataFrame(records)
     if result.empty:
@@ -245,8 +244,13 @@ def _empty_ttest_row(protein_id: str, assay_map: dict) -> dict:
 def _empty_ttest_frame() -> pd.DataFrame:
     return pd.DataFrame(
         columns=[
-            "protein_id", "assay", "estimate", "statistic",
-            "p_value", "adj_p_value", "significant",
+            "protein_id",
+            "assay",
+            "estimate",
+            "statistic",
+            "p_value",
+            "adj_p_value",
+            "significant",
         ]
     )
 
@@ -254,6 +258,7 @@ def _empty_ttest_frame() -> pd.DataFrame:
 # ---------------------------------------------------------------------------
 # wilcoxon
 # ---------------------------------------------------------------------------
+
 
 def wilcoxon(
     dataset: AffinityDataset,
@@ -293,14 +298,14 @@ def wilcoxon(
 
         if pair_id is not None:
             if pair_id not in dataset.samples.columns:
-                raise ValueError(
-                    f"pair_id '{pair_id}' not found in dataset.samples."
-                )
-            df_tmp = pd.DataFrame({
-                "val": vals,
-                "group": groups,
-                "pair": dataset.samples[pair_id],
-            }).dropna(subset=["val", "group", "pair"])
+                raise ValueError(f"pair_id '{pair_id}' not found in dataset.samples.")
+            df_tmp = pd.DataFrame(
+                {
+                    "val": vals,
+                    "group": groups,
+                    "pair": dataset.samples[pair_id],
+                }
+            ).dropna(subset=["val", "group", "pair"])
 
             pivot = df_tmp.pivot(index="pair", columns="group", values="val")
             pivot = pivot.dropna()
@@ -329,13 +334,15 @@ def wilcoxon(
             stat, pval = scipy_stats.mannwhitneyu(a, b, alternative="two-sided")
             estimate = float(np.nanmean(a) - np.nanmean(b))
 
-        records.append({
-            "protein_id": protein_id,
-            "assay": assay_map.get(protein_id, None),
-            "estimate": estimate,
-            "statistic": float(stat),
-            "p_value": float(pval),
-        })
+        records.append(
+            {
+                "protein_id": protein_id,
+                "assay": assay_map.get(protein_id, None),
+                "estimate": estimate,
+                "statistic": float(stat),
+                "p_value": float(pval),
+            }
+        )
 
     result = pd.DataFrame(records)
     if result.empty:
@@ -349,6 +356,7 @@ def wilcoxon(
 # ---------------------------------------------------------------------------
 # anova
 # ---------------------------------------------------------------------------
+
 
 def anova(
     dataset: AffinityDataset,
@@ -388,9 +396,7 @@ def anova(
         # Validate covariates exist
         for cov in covariates:
             if cov not in dataset.samples.columns:
-                raise ValueError(
-                    f"Covariate '{cov}' not found in dataset.samples."
-                )
+                raise ValueError(f"Covariate '{cov}' not found in dataset.samples.")
 
     records: list[dict] = []
 
@@ -398,9 +404,7 @@ def anova(
         vals = dataset.expression[protein_id]
 
         if use_ols:
-            stat, pval, df_b, df_w = _anova_ols(
-                vals, groups, dataset.samples, group_var, covariates
-            )
+            stat, pval, df_b, df_w = _anova_ols(vals, groups, dataset.samples, group_var, covariates)
         else:
             # Simple one-way ANOVA via scipy
             group_arrays = []
@@ -427,14 +431,16 @@ def anova(
             records.append(_empty_anova_row(protein_id, assay_map))
             continue
 
-        records.append({
-            "protein_id": protein_id,
-            "assay": assay_map.get(protein_id, None),
-            "statistic": float(stat),
-            "df_between": int(df_b),
-            "df_within": int(df_w),
-            "p_value": float(pval),
-        })
+        records.append(
+            {
+                "protein_id": protein_id,
+                "assay": assay_map.get(protein_id, None),
+                "statistic": float(stat),
+                "df_between": int(df_b),
+                "df_within": int(df_w),
+                "p_value": float(pval),
+            }
+        )
 
     result = pd.DataFrame(records)
     if result.empty:
@@ -457,15 +463,14 @@ def _anova_ols(
         from statsmodels.formula.api import ols
         from statsmodels.stats.anova import anova_lm
     except ImportError:
-        raise ImportError(
-            "statsmodels is required for ANCOVA. "
-            "Install it with:  pip install statsmodels"
-        )
+        raise ImportError("statsmodels is required for ANCOVA. Install it with:  pip install statsmodels")
 
-    df = pd.DataFrame({
-        "y": vals,
-        group_var: groups,
-    })
+    df = pd.DataFrame(
+        {
+            "y": vals,
+            group_var: groups,
+        }
+    )
     for cov in covariates:
         df[cov] = samples[cov].values
 
@@ -508,8 +513,14 @@ def _empty_anova_row(protein_id: str, assay_map: dict) -> dict:
 def _empty_anova_frame() -> pd.DataFrame:
     return pd.DataFrame(
         columns=[
-            "protein_id", "assay", "statistic", "df_between", "df_within",
-            "p_value", "adj_p_value", "significant",
+            "protein_id",
+            "assay",
+            "statistic",
+            "df_between",
+            "df_within",
+            "p_value",
+            "adj_p_value",
+            "significant",
         ]
     )
 
@@ -517,6 +528,7 @@ def _empty_anova_frame() -> pd.DataFrame:
 # ---------------------------------------------------------------------------
 # anova_posthoc (Tukey HSD)
 # ---------------------------------------------------------------------------
+
 
 def anova_posthoc(
     dataset: AffinityDataset,
@@ -546,10 +558,7 @@ def anova_posthoc(
     groups = _validate_group_var(dataset, group_var, min_levels=2)
     assay_map = _resolve_assay_map(dataset)
 
-    protein_ids = (
-        list(proteins) if proteins is not None
-        else list(dataset.expression.columns)
-    )
+    protein_ids = list(proteins) if proteins is not None else list(dataset.expression.columns)
 
     records: list[dict] = []
 
@@ -559,10 +568,12 @@ def anova_posthoc(
 
         vals = dataset.expression[protein_id]
 
-        df_tmp = pd.DataFrame({
-            "val": vals,
-            "group": groups,
-        }).dropna()
+        df_tmp = pd.DataFrame(
+            {
+                "val": vals,
+                "group": groups,
+            }
+        ).dropna()
 
         if df_tmp["group"].nunique() < 2 or len(df_tmp) < 3:
             continue
@@ -592,22 +603,30 @@ def anova_posthoc(
                 ci_low = float(result.confint[idx, 0])
                 ci_high = float(result.confint[idx, 1])
 
-                records.append({
-                    "protein_id": protein_id,
-                    "assay": assay_map.get(protein_id, None),
-                    "contrast": f"{g_a} - {g_b}",
-                    "estimate": meandiff,
-                    "p_value": pval,
-                    "ci_lower": ci_low,
-                    "ci_upper": ci_high,
-                })
+                records.append(
+                    {
+                        "protein_id": protein_id,
+                        "assay": assay_map.get(protein_id, None),
+                        "contrast": f"{g_a} - {g_b}",
+                        "estimate": meandiff,
+                        "p_value": pval,
+                        "ci_lower": ci_low,
+                        "ci_upper": ci_high,
+                    }
+                )
 
     result_df = pd.DataFrame(records)
     if result_df.empty:
         return pd.DataFrame(
             columns=[
-                "protein_id", "assay", "contrast", "estimate",
-                "p_value", "adj_p_value", "ci_lower", "ci_upper",
+                "protein_id",
+                "assay",
+                "contrast",
+                "estimate",
+                "p_value",
+                "adj_p_value",
+                "ci_lower",
+                "ci_upper",
             ]
         )
 

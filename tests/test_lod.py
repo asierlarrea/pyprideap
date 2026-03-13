@@ -379,17 +379,21 @@ def _make_somascan_dataset_with_buffers(
 ):
     """Build a SomaScan dataset with buffer samples for eLOD testing."""
     n_samples = n_bio + n_buffers
-    samples = pd.DataFrame({
-        "SampleId": [f"S{i}" for i in range(n_samples)],
-        "SampleType": ["Sample"] * n_bio + ["Buffer"] * n_buffers,
-    })
+    samples = pd.DataFrame(
+        {
+            "SampleId": [f"S{i}" for i in range(n_samples)],
+            "SampleType": ["Sample"] * n_bio + ["Buffer"] * n_buffers,
+        }
+    )
 
-    features = pd.DataFrame({
-        "SeqId": [f"10000-{i}" for i in range(n_features)],
-        "UniProt": [f"P{i}" for i in range(n_features)],
-        "Target": [f"T{i}" for i in range(n_features)],
-        "Dilution": ["20"] * n_features,
-    })
+    features = pd.DataFrame(
+        {
+            "SeqId": [f"10000-{i}" for i in range(n_features)],
+            "UniProt": [f"P{i}" for i in range(n_features)],
+            "Target": [f"T{i}" for i in range(n_features)],
+            "Dilution": ["20"] * n_features,
+        }
+    )
 
     rng = np.random.default_rng(42)
     expr_data = np.empty((n_samples, n_features))

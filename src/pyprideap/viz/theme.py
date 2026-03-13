@@ -107,6 +107,7 @@ def pride_fill_discrete(n: int | None = None) -> list[str]:
 # Continuous / gradient palette
 # ---------------------------------------------------------------------------
 
+
 def pride_color_gradient(n: int = 10) -> list[str]:
     """Return *n* hex colours interpolated along a blue-to-red gradient.
 
@@ -125,12 +126,12 @@ def pride_color_gradient(n: int = 10) -> list[str]:
 
     # Anchor RGB stops (6 stops for a rich blue-to-red ramp)
     _stops: list[tuple[int, int, int]] = [
-        (52, 152, 219),   # #3498db  blue
-        (26, 188, 156),   # #1abc9c  teal
-        (46, 204, 113),   # #2ecc71  green
-        (241, 196, 15),   # #f1c40f  yellow
-        (230, 126, 34),   # #e67e22  orange
-        (231, 76, 60),    # #e74c3c  red
+        (52, 152, 219),  # #3498db  blue
+        (26, 188, 156),  # #1abc9c  teal
+        (46, 204, 113),  # #2ecc71  green
+        (241, 196, 15),  # #f1c40f  yellow
+        (230, 126, 34),  # #e67e22  orange
+        (231, 76, 60),  # #e74c3c  red
     ]
 
     colors: list[str] = []
@@ -154,6 +155,7 @@ def pride_color_gradient(n: int = 10) -> list[str]:
 # ---------------------------------------------------------------------------
 # Plot theme
 # ---------------------------------------------------------------------------
+
 
 def set_plot_theme(fig: Figure) -> Figure:
     """Apply the pyprideap house style to a Plotly figure *in place*.

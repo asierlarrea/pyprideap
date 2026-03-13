@@ -60,7 +60,7 @@ _HELP_TEXT: dict[str, str] = {
     ),
     "dimreduction": (
         "Dimensionality reduction projects the high-dimensional protein expression data onto two axes. "
-        "Use the dropdown to switch between PCA and t-SNE. "
+        "Use the toggle switch to switch between PCA and t-SNE. "
         "<strong>PCA</strong> (Principal Component Analysis) captures the directions of maximum variance — "
         "the percentage on each axis shows how much total variance that component explains. "
         "<strong>t-SNE</strong> (t-distributed Stochastic Neighbor Embedding) is a non-linear technique "
@@ -248,6 +248,35 @@ footer {
     nav.toc a:hover, nav.toc a.active { border-left: none; }
     .main-content { padding: 16px; }
 }
+/* --- Dim-reduction toggle switch --- */
+.dimred-toggle {
+    display: inline-flex; align-items: center; gap: 8px;
+    margin-left: auto; margin-right: 8px;
+}
+.dimred-label {
+    font-size: 0.82em; font-weight: 500; color: var(--text-muted);
+    transition: color 0.2s;
+}
+.dimred-label-active { color: var(--heading); font-weight: 600; }
+.toggle-switch {
+    position: relative; display: inline-block;
+    width: 40px; height: 22px; cursor: pointer;
+}
+.toggle-switch input { opacity: 0; width: 0; height: 0; }
+.toggle-slider {
+    position: absolute; inset: 0;
+    background: var(--primary); border-radius: 22px;
+    transition: background 0.3s;
+}
+.toggle-slider::before {
+    content: ""; position: absolute;
+    width: 16px; height: 16px; left: 3px; bottom: 3px;
+    background: white; border-radius: 50%;
+    transition: transform 0.3s;
+}
+.toggle-switch input:checked + .toggle-slider::before {
+    transform: translateX(18px);
+}
 /* --- PRIDE embedded mode --- */
 body.pride-embedded {
     --bg: transparent;
@@ -296,6 +325,30 @@ document.addEventListener('DOMContentLoaded', function() {
         window.addEventListener('scroll', updateActive, {passive: true});
         updateActive();
     }
+    // Dimensionality reduction toggle (PCA ↔ t-SNE)
+    window.toggleDimRed = function(checkbox) {
+        var pcaPanel = document.getElementById('dimred-pca');
+        var tsnePanel = document.getElementById('dimred-tsne');
+        var lblPca = document.getElementById('dimred-lbl-pca');
+        var lblTsne = document.getElementById('dimred-lbl-tsne');
+        if (!pcaPanel || !tsnePanel) return;
+        if (checkbox.checked) {
+            pcaPanel.style.display = 'none';
+            tsnePanel.style.display = 'block';
+            lblPca.classList.remove('dimred-label-active');
+            lblTsne.classList.add('dimred-label-active');
+            // Trigger Plotly resize so the chart fills its container
+            var tsPlot = tsnePanel.querySelector('.plotly-graph-div');
+            if (tsPlot && window.Plotly) Plotly.Plots.resize(tsPlot);
+        } else {
+            tsnePanel.style.display = 'none';
+            pcaPanel.style.display = 'block';
+            lblTsne.classList.remove('dimred-label-active');
+            lblPca.classList.add('dimred-label-active');
+            var pcaPlot = pcaPanel.querySelector('.plotly-graph-div');
+            if (pcaPlot && window.Plotly) Plotly.Plots.resize(pcaPlot);
+        }
+    };
     // PRIDE iframe embedding
     if (window.self !== window.top) {
         document.body.classList.add('pride-embedded');
@@ -337,11 +390,13 @@ def _lod_source_info(dataset: AffinityDataset) -> dict[str, object]:
             n_assays = int(reported.notna().any(axis=0).sum())
         else:
             n_assays = int(reported.notna().sum())
-        sources.append({
-            "name": "Reported LOD",
-            "status": "available",
-            "detail": f"LOD column in NPX file ({n_assays} assays)",
-        })
+        sources.append(
+            {
+                "name": "Reported LOD",
+                "status": "available",
+                "detail": f"LOD column in NPX file ({n_assays} assays)",
+            }
+        )
         if info["active"] is None:
             info["active"] = "Reported LOD"
     else:
@@ -352,26 +407,32 @@ def _lod_source_info(dataset: AffinityDataset) -> dict[str, object]:
         nc_mask = _find_negative_controls(dataset)
         n_controls = int(nc_mask.sum())
         if n_controls >= _MIN_CONTROLS_FOR_LOD:
-            sources.append({
-                "name": "NCLOD",
-                "status": "available",
-                "detail": f"Computed from {n_controls} negative control samples",
-            })
+            sources.append(
+                {
+                    "name": "NCLOD",
+                    "status": "available",
+                    "detail": f"Computed from {n_controls} negative control samples",
+                }
+            )
             if info["active"] is None:
                 info["active"] = "NCLOD"
         else:
-            sources.append({
-                "name": "NCLOD",
-                "status": "insufficient",
-                "detail": f"Only {n_controls} negative controls (need \u2265{_MIN_CONTROLS_FOR_LOD})",
-            })
+            sources.append(
+                {
+                    "name": "NCLOD",
+                    "status": "insufficient",
+                    "detail": f"Only {n_controls} negative controls (need \u2265{_MIN_CONTROLS_FOR_LOD})",
+                }
+            )
     except (ValueError, KeyError):
         has_st = "SampleType" in dataset.samples.columns
-        sources.append({
-            "name": "NCLOD",
-            "status": "unavailable",
-            "detail": "No SampleType column" if not has_st else "No negative control samples found",
-        })
+        sources.append(
+            {
+                "name": "NCLOD",
+                "status": "unavailable",
+                "detail": "No SampleType column" if not has_st else "No negative control samples found",
+            }
+        )
 
     # 3. Platform-specific LOD sources
     from pyprideap.core import Platform
@@ -380,35 +441,44 @@ def _lod_source_info(dataset: AffinityDataset) -> dict[str, object]:
         # SomaScan: eLOD from buffer samples (not FixedLOD)
         try:
             from pyprideap.processing.lod import compute_soma_elod
+
             compute_soma_elod(dataset)
-            sources.append({
-                "name": "eLOD",
-                "status": "available",
-                "detail": "Computed from buffer samples (MAD formula)",
-            })
+            sources.append(
+                {
+                    "name": "eLOD",
+                    "status": "available",
+                    "detail": "Computed from buffer samples (MAD formula)",
+                }
+            )
             if info["active"] is None:
                 info["active"] = "eLOD"
         except (ValueError, KeyError, ImportError):
-            sources.append({
-                "name": "eLOD",
-                "status": "unavailable",
-                "detail": "No buffer samples found for eLOD computation",
-            })
+            sources.append(
+                {
+                    "name": "eLOD",
+                    "status": "unavailable",
+                    "detail": "No buffer samples found for eLOD computation",
+                }
+            )
     else:
         # Olink: FixedLOD from bundled configs
         fixed_path = get_bundled_fixed_lod_path(dataset.platform)
         if fixed_path is not None:
-            sources.append({
-                "name": "FixedLOD",
-                "status": "available",
-                "detail": f"Bundled reference file ({fixed_path.name})",
-            })
+            sources.append(
+                {
+                    "name": "FixedLOD",
+                    "status": "available",
+                    "detail": f"Bundled reference file ({fixed_path.name})",
+                }
+            )
         else:
-            sources.append({
-                "name": "FixedLOD",
-                "status": "unavailable",
-                "detail": f"No bundled file for {dataset.platform.value}",
-            })
+            sources.append(
+                {
+                    "name": "FixedLOD",
+                    "status": "unavailable",
+                    "detail": f"No bundled file for {dataset.platform.value}",
+                }
+            )
 
     info["sources"] = sources
     info["platform"] = dataset.platform.value
@@ -436,30 +506,30 @@ def _render_lod_card(lod_info: dict[str, object]) -> str:
     warning_html = ""
     if no_lod:
         has_fallback = any(
-            s["name"] in ("FixedLOD", "eLOD") and s["status"] == "available"
-            for s in lod_info["sources"]
+            s["name"] in ("FixedLOD", "eLOD") and s["status"] == "available" for s in lod_info["sources"]
         )
         if has_fallback:
             fallback_name = next(
-                s["name"] for s in lod_info["sources"]
+                s["name"]
+                for s in lod_info["sources"]
                 if s["name"] in ("FixedLOD", "eLOD") and s["status"] == "available"
             )
             warning_html = (
                 '<div style="background:#fff3cd;border:1px solid #ffc107;border-radius:6px;'
                 'padding:10px 14px;margin-top:10px;color:#856404;font-size:0.92em;">'
-                '\u26a0\ufe0f <strong>Warning:</strong> No Reported LOD or NCLOD available. '
-                'LOD-dependent plots (QC Summary, LOD Analysis) will not be shown. '
-                f'Consider using <strong>{fallback_name}</strong> for this platform.'
-                '</div>'
+                "\u26a0\ufe0f <strong>Warning:</strong> No Reported LOD or NCLOD available. "
+                "LOD-dependent plots (QC Summary, LOD Analysis) will not be shown. "
+                f"Consider using <strong>{fallback_name}</strong> for this platform."
+                "</div>"
             )
         else:
             warning_html = (
                 '<div style="background:#f8d7da;border:1px solid #f5c6cb;border-radius:6px;'
                 'padding:10px 14px;margin-top:10px;color:#721c24;font-size:0.92em;">'
-                '\u26a0\ufe0f <strong>Warning:</strong> No LOD source is available for this dataset. '
-                'No Reported LOD in the data file and insufficient negative controls for NCLOD. '
-                'LOD-dependent plots (QC Summary, LOD Analysis) will not be shown.'
-                '</div>'
+                "\u26a0\ufe0f <strong>Warning:</strong> No LOD source is available for this dataset. "
+                "No Reported LOD in the data file and insufficient negative controls for NCLOD. "
+                "LOD-dependent plots (QC Summary, LOD Analysis) will not be shown."
+                "</div>"
             )
 
     return (
@@ -478,8 +548,7 @@ def _render_lod_card(lod_info: dict[str, object]) -> str:
             "<strong>eLOD</strong> is computed from buffer samples using a MAD-based formula. "
             "The report uses the first available source (Reported &gt; NCLOD &gt; eLOD)."
             if lod_info.get("platform") == "somascan"
-            else
-            "Three LOD sources are supported: "
+            else "Three LOD sources are supported: "
             "<strong>Reported LOD</strong> comes from the LOD column in the original NPX file (per sample and assay). "
             "<strong>NCLOD</strong> is computed from negative control samples using the formula "
             "LOD = median(NC) + max(0.2, 3&times;SD(NC)), following the OlinkAnalyze R package. "
@@ -487,10 +556,10 @@ def _render_lod_card(lod_info: dict[str, object]) -> str:
             "<strong>FixedLOD</strong> is a pre-computed reference from Olink, specific to the reagent lot and "
             "Data Analysis Reference ID. "
             "The report uses the first available source (Reported &gt; NCLOD &gt; FixedLOD)."
-        ) +
-        "</div>"
+        )
+        + "</div>"
         '<table style="width:100%;border-collapse:collapse;margin-top:8px;">'
-        f'{"".join(rows)}'
+        f"{''.join(rows)}"
         "</table>"
         f"{warning_html}"
         "</div>"
@@ -569,12 +638,11 @@ def qc_report(dataset: AffinityDataset, output: str | Path) -> Path:
     rendered: dict[str, tuple[str, str]] = {}  # key -> (title, html)
     first_key = None
 
-    # Handle combined dimensionality reduction (PCA + UMAP in one panel)
+    # Handle combined dimensionality reduction (PCA + t-SNE in one panel with toggle)
     pca_data = plot_data.get("pca")
-    umap_data = plot_data.get("umap")
-    dimred_fig = R.render_dimreduction(pca_data, umap_data)
-    if dimred_fig is not None:
-        dimred_fig.update_layout(height=500)
+    umap_data = plot_data.get("umap")  # actually t-SNE data
+    has_dimred = pca_data is not None or umap_data is not None
+    if has_dimred:
         # Check if dimreduction is the first plot in display order
         for key in display_order:
             if key == "dimreduction":
@@ -583,9 +651,45 @@ def qc_report(dataset: AffinityDataset, output: str | Path) -> Path:
             if key in _RENDERERS and plot_data.get(key) is not None:
                 first_key = key
                 break
-        js = "cdn" if first_key == "dimreduction" else False
-        plot_html = dimred_fig.to_html(full_html=False, include_plotlyjs=js, default_height="500px")
-        rendered["dimreduction"] = ("Dimensionality Reduction", plot_html)
+
+        dimred_parts: list[str] = []
+        need_plotly_cdn = first_key == "dimreduction"
+
+        if pca_data is not None:
+            pca_fig = R.render_pca(pca_data)
+            pca_fig.update_layout(height=500)
+            js = "cdn" if need_plotly_cdn else False
+            need_plotly_cdn = False  # only include CDN once
+            pca_html = pca_fig.to_html(full_html=False, include_plotlyjs=js, default_height="500px")
+            dimred_parts.append(f'<div class="dimred-panel" id="dimred-pca">{pca_html}</div>')
+
+        if umap_data is not None:
+            tsne_fig = R.render_tsne(umap_data)
+            tsne_fig.update_layout(height=500)
+            js = "cdn" if need_plotly_cdn else False
+            tsne_html = tsne_fig.to_html(full_html=False, include_plotlyjs=js, default_height="500px")
+            hidden = ' style="display:none"' if pca_data is not None else ""
+            dimred_parts.append(f'<div class="dimred-panel" id="dimred-tsne"{hidden}>{tsne_html}</div>')
+
+        nl_method = umap_data.title if umap_data is not None else "t-SNE"
+        combined_html = "".join(dimred_parts)
+
+        # Build toggle switch only if both methods available
+        if pca_data is not None and umap_data is not None:
+            toggle_html = (
+                '<div class="dimred-toggle">'
+                '<span class="dimred-label dimred-label-active" id="dimred-lbl-pca">PCA</span>'
+                '<label class="toggle-switch">'
+                '<input type="checkbox" id="dimred-switch" onchange="toggleDimRed(this)">'
+                '<span class="toggle-slider"></span>'
+                "</label>"
+                f'<span class="dimred-label" id="dimred-lbl-tsne">{nl_method}</span>'
+                "</div>"
+            )
+        else:
+            toggle_html = ""
+
+        rendered["dimreduction"] = ("Dimensionality Reduction", combined_html, toggle_html)
 
     # Find first key if not already set
     if first_key is None:
@@ -619,16 +723,18 @@ def qc_report(dataset: AffinityDataset, output: str | Path) -> Path:
         for key in keys:
             if key not in rendered:
                 continue
-            title, plot_html = rendered[key]
+            entry = rendered[key]
+            title = entry[0]
+            plot_html = entry[1]
+            extra_header = entry[2] if len(entry) > 2 else ""
             help_html = _HELP_TEXT.get(key, "")
             group_toc_items.append(f'<li><a href="#{key}">{title}</a></li>')
-            help_block = (
-                f'<div class="help-text">{help_html}</div>' if help_html else ""
-            )
+            help_block = f'<div class="help-text">{help_html}</div>' if help_html else ""
             cards.append(
                 f'<div class="plot-card" id="{key}">'
                 f'<div class="plot-header">'
                 f"<h3>{title}</h3>"
+                f"{extra_header}"
                 f'<button class="help-toggle" title="How to read this plot" aria-label="Help">?</button>'
                 f"</div>"
                 f"{help_block}"
@@ -637,13 +743,8 @@ def qc_report(dataset: AffinityDataset, output: str | Path) -> Path:
             )
         if cards:
             toc_html_parts.append(f'<div class="toc-group-label">{group_title}</div>')
-            toc_html_parts.append(f'<ul>{"".join(group_toc_items)}</ul>')
-            group_sections.append(
-                f'<div class="section-group">'
-                f"<h2>{group_title}</h2>"
-                f"{''.join(cards)}"
-                f"</div>"
-            )
+            toc_html_parts.append(f"<ul>{''.join(group_toc_items)}</ul>")
+            group_sections.append(f'<div class="section-group"><h2>{group_title}</h2>{"".join(cards)}</div>')
     toc_inner = "".join(toc_html_parts)
 
     platform_label = dataset.platform.value.replace("_", " ").title()
@@ -670,12 +771,10 @@ def qc_report(dataset: AffinityDataset, output: str | Path) -> Path:
     if n_proteins > 0:
         stat_items.append(f'<span class="stat-item"><strong>Proteins</strong> {n_proteins}</span>')
     if n_proteins_above_lod is not None:
-        stat_items.append(
-            f'<span class="stat-item"><strong>Proteins &gt; LOD</strong> {n_proteins_above_lod}</span>'
-        )
+        stat_items.append(f'<span class="stat-item"><strong>Proteins &gt; LOD</strong> {n_proteins_above_lod}</span>')
 
     html = (
-        "<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n"
+        '<!DOCTYPE html>\n<html lang="en">\n<head>\n'
         '    <meta charset="utf-8">\n'
         '    <meta name="viewport" content="width=device-width, initial-scale=1">\n'
         f"    <title>QC Report \u2014 {platform_label}</title>\n"
@@ -687,14 +786,14 @@ def qc_report(dataset: AffinityDataset, output: str | Path) -> Path:
         "        <header>\n"
         f"            <h1>QC Report &mdash; {platform_label}</h1>\n"
         f'            <div class="stats">\n'
-        f'                {"".join(stat_items)}\n'
+        f"                {''.join(stat_items)}\n"
         f"            </div>\n"
         "        </header>\n"
         f"        {lod_card_html}\n"
         '        <div class="pride-embedded-empty" style="display:none;text-align:center;'
         'padding:40px;color:#777;">No QC plots available for this dataset.</div>\n'
         f"        {''.join(group_sections)}\n"
-        f'        <footer>Generated by <strong>pyprideap</strong></footer>\n'
+        f"        <footer>Generated by <strong>pyprideap</strong></footer>\n"
         "    </div>\n"
         "</div>\n"
         f"    <script>\n{_JS}    </script>\n"

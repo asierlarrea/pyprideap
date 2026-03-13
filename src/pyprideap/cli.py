@@ -33,8 +33,7 @@ def _download_pad_files(accession: str, dest_dir: Path) -> list[Path]:
     data_urls = {
         name: url
         for name, url in urls.items()
-        if any(name.lower().endswith(ext) for ext in data_extensions)
-        and "checksum" not in name.lower()
+        if any(name.lower().endswith(ext) for ext in data_extensions) and "checksum" not in name.lower()
     }
 
     if not data_urls:
@@ -133,11 +132,13 @@ def main(argv: list[str] | None = None) -> None:
         help="Path to NPX/ADAT file, or a PAD accession (e.g. PAD000001)",
     )
     report_parser.add_argument(
-        "-o", "--output",
+        "-o",
+        "--output",
         help="Output HTML file path (default: <input>_qc_report.html)",
     )
     report_parser.add_argument(
-        "-p", "--platform",
+        "-p",
+        "--platform",
         choices=["olink", "somascan"],
         default=None,
         help="Force platform type (default: auto-detect from file)",

@@ -12,21 +12,27 @@ def _make_two_group_dataset():
     """Dataset with two groups, 4 samples each."""
     return AffinityDataset(
         platform=Platform.OLINK_EXPLORE,
-        samples=pd.DataFrame({
-            "SampleID": [f"S{i}" for i in range(8)],
-            "SampleType": ["SAMPLE"] * 8,
-            "SampleQC": ["PASS"] * 8,
-            "Group": ["A", "A", "A", "A", "B", "B", "B", "B"],
-        }),
-        features=pd.DataFrame({
-            "OlinkID": ["O1", "O2"],
-            "UniProt": ["P1", "P2"],
-            "Panel": ["Inf", "Inf"],
-        }),
-        expression=pd.DataFrame({
-            "O1": [1.0, 1.5, 2.0, 1.2, 5.0, 5.5, 6.0, 5.2],
-            "O2": [3.0, 3.1, 3.2, 3.0, 3.3, 3.4, 3.1, 3.2],
-        }),
+        samples=pd.DataFrame(
+            {
+                "SampleID": [f"S{i}" for i in range(8)],
+                "SampleType": ["SAMPLE"] * 8,
+                "SampleQC": ["PASS"] * 8,
+                "Group": ["A", "A", "A", "A", "B", "B", "B", "B"],
+            }
+        ),
+        features=pd.DataFrame(
+            {
+                "OlinkID": ["O1", "O2"],
+                "UniProt": ["P1", "P2"],
+                "Panel": ["Inf", "Inf"],
+            }
+        ),
+        expression=pd.DataFrame(
+            {
+                "O1": [1.0, 1.5, 2.0, 1.2, 5.0, 5.5, 6.0, 5.2],
+                "O2": [3.0, 3.1, 3.2, 3.0, 3.3, 3.4, 3.1, 3.2],
+            }
+        ),
         metadata={},
     )
 
@@ -35,21 +41,27 @@ def _make_three_group_dataset():
     """Dataset with three groups, 3 samples each."""
     return AffinityDataset(
         platform=Platform.OLINK_EXPLORE,
-        samples=pd.DataFrame({
-            "SampleID": [f"S{i}" for i in range(9)],
-            "SampleType": ["SAMPLE"] * 9,
-            "SampleQC": ["PASS"] * 9,
-            "Group": ["A", "A", "A", "B", "B", "B", "C", "C", "C"],
-        }),
-        features=pd.DataFrame({
-            "OlinkID": ["O1", "O2"],
-            "UniProt": ["P1", "P2"],
-            "Panel": ["Inf", "Inf"],
-        }),
-        expression=pd.DataFrame({
-            "O1": [1.0, 1.5, 2.0, 5.0, 5.5, 6.0, 10.0, 10.5, 11.0],
-            "O2": [3.0, 3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 3.7, 3.8],
-        }),
+        samples=pd.DataFrame(
+            {
+                "SampleID": [f"S{i}" for i in range(9)],
+                "SampleType": ["SAMPLE"] * 9,
+                "SampleQC": ["PASS"] * 9,
+                "Group": ["A", "A", "A", "B", "B", "B", "C", "C", "C"],
+            }
+        ),
+        features=pd.DataFrame(
+            {
+                "OlinkID": ["O1", "O2"],
+                "UniProt": ["P1", "P2"],
+                "Panel": ["Inf", "Inf"],
+            }
+        ),
+        expression=pd.DataFrame(
+            {
+                "O1": [1.0, 1.5, 2.0, 5.0, 5.5, 6.0, 10.0, 10.5, 11.0],
+                "O2": [3.0, 3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 3.7, 3.8],
+            }
+        ),
         metadata={},
     )
 
@@ -63,8 +75,12 @@ class TestTtest:
         assert isinstance(result, pd.DataFrame)
         assert len(result) == 2  # one row per protein
         expected_cols = {
-            "protein_id", "estimate", "statistic",
-            "p_value", "adj_p_value", "significant",
+            "protein_id",
+            "estimate",
+            "statistic",
+            "p_value",
+            "adj_p_value",
+            "significant",
         }
         assert expected_cols.issubset(set(result.columns))
         # O1 has a large difference between groups => should be significant
@@ -87,8 +103,12 @@ class TestWilcoxon:
         assert isinstance(result, pd.DataFrame)
         assert len(result) == 2
         expected_cols = {
-            "protein_id", "estimate", "statistic",
-            "p_value", "adj_p_value", "significant",
+            "protein_id",
+            "estimate",
+            "statistic",
+            "p_value",
+            "adj_p_value",
+            "significant",
         }
         assert expected_cols.issubset(set(result.columns))
         # p_values should be valid numbers
@@ -104,8 +124,13 @@ class TestAnova:
         assert isinstance(result, pd.DataFrame)
         assert len(result) == 2
         expected_cols = {
-            "protein_id", "statistic", "df_between", "df_within",
-            "p_value", "adj_p_value", "significant",
+            "protein_id",
+            "statistic",
+            "df_between",
+            "df_within",
+            "p_value",
+            "adj_p_value",
+            "significant",
         }
         assert expected_cols.issubset(set(result.columns))
         # O1 has strongly separated groups => significant
@@ -121,8 +146,11 @@ class TestAnova:
         assert isinstance(result, pd.DataFrame)
         assert len(result) > 0
         expected_cols = {
-            "protein_id", "contrast", "estimate",
-            "p_value", "adj_p_value",
+            "protein_id",
+            "contrast",
+            "estimate",
+            "p_value",
+            "adj_p_value",
         }
         assert expected_cols.issubset(set(result.columns))
         # 3 groups => 3 pairwise contrasts per protein, 2 proteins => 6 rows

@@ -190,17 +190,21 @@ class TestAssessBridgeability:
 
 def _make_somascan_dataset(sample_ids, expression_data):
     """Build a minimal SomaScan dataset for normalization tests."""
-    samples = pd.DataFrame({
-        "SampleId": sample_ids,
-        "SampleType": ["Sample"] * len(sample_ids),
-    })
+    samples = pd.DataFrame(
+        {
+            "SampleId": sample_ids,
+            "SampleType": ["Sample"] * len(sample_ids),
+        }
+    )
     expr = pd.DataFrame(expression_data, index=range(len(sample_ids)))
-    features = pd.DataFrame({
-        "SeqId": list(expr.columns),
-        "UniProt": [f"P{i}" for i in range(len(expr.columns))],
-        "Target": [f"T{i}" for i in range(len(expr.columns))],
-        "Dilution": ["20"] * len(expr.columns),
-    })
+    features = pd.DataFrame(
+        {
+            "SeqId": list(expr.columns),
+            "UniProt": [f"P{i}" for i in range(len(expr.columns))],
+            "Target": [f"T{i}" for i in range(len(expr.columns))],
+            "Dilution": ["20"] * len(expr.columns),
+        }
+    )
     return AffinityDataset(
         platform=Platform.SOMASCAN,
         samples=samples,

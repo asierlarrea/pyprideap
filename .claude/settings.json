@@ -74,7 +74,10 @@
       "Bash(/Users/yperez/work/pyap/.venv/bin/pip uninstall:*)",
       "Bash(/Users/yperez/work/pyap/.venv/bin/python -m pytest tests/ -x -q)",
       "Bash(/Users/yperez/work/pyap/.venv/bin/python -c \":*)",
-      "Bash(/Users/yperez/work/pyap/.venv/bin/ruff check:*)"
+      "Bash(/Users/yperez/work/pyap/.venv/bin/ruff check:*)",
+      "Bash(/Users/yperez/work/pyap/.venv/bin/ruff format:*)",
+      "Bash(python -m pytest tests/test_qc_render.py tests/test_qc_compute.py -x -q)",
+      "Bash(pip3 show:*)"
     ],
     "additionalDirectories": [
       "/Users/yperez/work/pyap/configs",

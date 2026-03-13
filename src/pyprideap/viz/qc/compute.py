@@ -574,10 +574,7 @@ def compute_data_completeness(dataset: AffinityDataset) -> DataCompletenessData 
     # Override per-protein missing frequency with MissingFreq column if available
     if olink_missing_freq is not None:
         protein_ids = [str(c) for c in numeric.columns]
-        missing_freq_values = [
-            round(float(v), 4) if pd.notna(v) else 0.0
-            for v in olink_missing_freq
-        ]
+        missing_freq_values = [round(float(v), 4) if pd.notna(v) else 0.0 for v in olink_missing_freq]
         # If we didn't have LOD data for per-sample rates, compute approximate
         # overall rates from MissingFreq
         if not has_lod_data:
@@ -698,11 +695,7 @@ def compute_norm_scale(dataset: AffinityDataset) -> NormScaleData | None:
         return None
 
     sample_ids = _sample_ids(dataset)
-    plate_ids = (
-        dataset.samples["PlateId"].astype(str).tolist()
-        if "PlateId" in dataset.samples.columns
-        else []
-    )
+    plate_ids = dataset.samples["PlateId"].astype(str).tolist() if "PlateId" in dataset.samples.columns else []
 
     return NormScaleData(
         sample_ids=sample_ids,
@@ -775,14 +768,16 @@ def compute_lod_comparison(dataset: AffinityDataset) -> LodComparisonData | None
             common = sx.dropna().index.intersection(sy.dropna().index)
             if len(common) < 2:
                 continue
-            pairs.append({
-                "name_x": names[i],
-                "name_y": names[j],
-                "assay_ids": [str(c) for c in common],
-                "values_x": np.round(sx.reindex(common).values, 4).tolist(),
-                "values_y": np.round(sy.reindex(common).values, 4).tolist(),
-                "panels": [panel_map.get(str(c), "") for c in common],
-            })
+            pairs.append(
+                {
+                    "name_x": names[i],
+                    "name_y": names[j],
+                    "assay_ids": [str(c) for c in common],
+                    "values_x": np.round(sx.reindex(common).values, 4).tolist(),
+                    "values_y": np.round(sy.reindex(common).values, 4).tolist(),
+                    "panels": [panel_map.get(str(c), "") for c in common],
+                }
+            )
 
     if not pairs:
         return None

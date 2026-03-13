@@ -52,12 +52,14 @@ _MIN_CONTROLS_FOR_LOD = 10
 _MIN_STD_FLOOR = 0.2
 _SOMA_ELOD_K = 3.3  # multiplier for ~95% detection probability
 _MAD_TO_SD = 1.4826  # MAD → SD conversion factor for normal distributions
-_NEGATIVE_CONTROL_TYPES = frozenset({
-    "negative",
-    "negative control",
-    "negative_control",
-    "neg",
-})
+_NEGATIVE_CONTROL_TYPES = frozenset(
+    {
+        "negative",
+        "negative control",
+        "negative_control",
+        "neg",
+    }
+)
 
 
 class LodMethod(Enum):
@@ -149,10 +151,12 @@ def _nclod_base(dataset: AffinityDataset) -> pd.Series:
 # SomaScan eLOD
 # ---------------------------------------------------------------------------
 
-_BUFFER_SAMPLE_TYPES = frozenset({
-    "buffer",
-    "buf",
-})
+_BUFFER_SAMPLE_TYPES = frozenset(
+    {
+        "buffer",
+        "buf",
+    }
+)
 
 
 def _find_buffer_samples(dataset: AffinityDataset) -> pd.Series:
@@ -192,9 +196,7 @@ def compute_soma_elod(dataset: AffinityDataset) -> pd.Series:
         If no buffer samples are found in the dataset.
     """
     buffer_mask = _find_buffer_samples(dataset)
-    numeric_expr = dataset.expression[buffer_mask].apply(
-        pd.to_numeric, errors="coerce"
-    )
+    numeric_expr = dataset.expression[buffer_mask].apply(pd.to_numeric, errors="coerce")
 
     medians = numeric_expr.median()
     # scipy.stats.median_abs_deviation uses scale=1.4826 by default,
@@ -380,8 +382,7 @@ def load_fixed_lod(
         bundled = get_bundled_fixed_lod_path(dataset.platform)
         if bundled is None:
             raise ValueError(
-                f"No bundled FixedLOD file for platform {dataset.platform.value}. "
-                f"Provide lod_file_path explicitly."
+                f"No bundled FixedLOD file for platform {dataset.platform.value}. Provide lod_file_path explicitly."
             )
         path = bundled
     else:
@@ -399,16 +400,15 @@ def load_fixed_lod(
 
     # Join on OlinkID + DataAnalysisRefID when available
     join_cols = ["OlinkID"]
-    if (
-        "DataAnalysisRefID" in lod_df.columns
-        and "DataAnalysisRefID" in dataset.features.columns
-    ):
+    if "DataAnalysisRefID" in lod_df.columns and "DataAnalysisRefID" in dataset.features.columns:
         join_cols.append("DataAnalysisRefID")
 
     if len(join_cols) > 1:
         feat_keys = dataset.features[join_cols].copy()
         merged = feat_keys.merge(
-            lod_df[join_cols + ["LODNPX"]], on=join_cols, how="left",
+            lod_df[join_cols + ["LODNPX"]],
+            on=join_cols,
+            how="left",
         )
         lod_map = dict(zip(dataset.features["OlinkID"], merged["LODNPX"]))
     else:
@@ -416,9 +416,7 @@ def load_fixed_lod(
         lod_dedup = lod_df.drop_duplicates(subset=["OlinkID"], keep="first")
         lod_map = dict(zip(lod_dedup["OlinkID"], lod_dedup["LODNPX"]))
 
-    lod_series = pd.Series(
-        {col: lod_map.get(col, np.nan) for col in dataset.expression.columns}
-    )
+    lod_series = pd.Series({col: lod_map.get(col, np.nan) for col in dataset.expression.columns})
     return lod_series
 
 
@@ -565,7 +563,8 @@ def compute_lod_stats(
         has_lod_per_col = has_lod.any(axis=0)
         for panel_name in dataset.features["Panel"].dropna().unique():
             panel_cols = [
-                c for c in dataset.expression.columns
+                c
+                for c in dataset.expression.columns
                 if panel_map.get(c) == panel_name and has_lod_per_col.get(c, False)
             ]
             if panel_cols:

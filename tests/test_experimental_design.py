@@ -6,10 +6,12 @@ from pyprideap.stats.design import randomize_plates
 
 def _make_samples(n, paired_col=None, paired_values=None):
     """Build a minimal samples DataFrame with n rows."""
-    df = pd.DataFrame({
-        "SampleID": [f"S{i}" for i in range(n)],
-        "SampleType": ["SAMPLE"] * n,
-    })
+    df = pd.DataFrame(
+        {
+            "SampleID": [f"S{i}" for i in range(n)],
+            "SampleType": ["SAMPLE"] * n,
+        }
+    )
     if paired_col is not None and paired_values is not None:
         df[paired_col] = paired_values
     return df
@@ -51,9 +53,7 @@ class TestRandomizePlates:
         paired_values = ["subj1"] * 3 + ["subj2"] * 3 + ["subj3"] * 3 + ["subj4"] * 3
         samples = _make_samples(12, paired_col="SubjectID", paired_values=paired_values)
 
-        result = randomize_plates(
-            samples, n_plates=2, plate_size=10, keep_paired="SubjectID", seed=42
-        )
+        result = randomize_plates(samples, n_plates=2, plate_size=10, keep_paired="SubjectID", seed=42)
 
         # Each subject's samples must be on the same plate
         for subj in ["subj1", "subj2", "subj3", "subj4"]:

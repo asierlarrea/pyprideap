@@ -123,6 +123,7 @@ def _parse_table_begin(
     The number of leading tabs in the feature metadata rows equals the
     number of sample metadata columns.
     """
+
     def strip_meta(s: str) -> str:
         return s.lstrip("\\").lstrip("!")
 
@@ -141,7 +142,7 @@ def _parse_table_begin(
                     non_empty_start = i
                     break
             field_name = parts[non_empty_start].strip()
-            values = parts[non_empty_start + 1:]
+            values = parts[non_empty_start + 1 :]
             feature_meta_rows.append((field_name, values))
         elif data_header_line is None:
             # First non-tab line is the sample column header
@@ -166,9 +167,9 @@ def _parse_table_begin(
     # Ensure Name column exists (needed by read_somascan_adat)
     if "Name" not in col_data.columns:
         if "SeqId" in col_data.columns:
-            col_data.insert(0, "Name", col_data["SeqId"].apply(
-                lambda s: f"seq.{s.replace('-', '.')}" if isinstance(s, str) else s
-            ))
+            col_data.insert(
+                0, "Name", col_data["SeqId"].apply(lambda s: f"seq.{s.replace('-', '.')}" if isinstance(s, str) else s)
+            )
         else:
             col_data.insert(0, "Name", [f"Analyte_{i}" for i in range(n_analytes)])
 

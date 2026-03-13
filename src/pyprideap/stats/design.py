@@ -86,10 +86,7 @@ def randomize_plates(
         )
 
     if plate_size > _TOTAL_WELLS:
-        raise ValueError(
-            f"plate_size ({plate_size}) exceeds the number of wells on a "
-            f"96-well plate ({_TOTAL_WELLS})."
-        )
+        raise ValueError(f"plate_size ({plate_size}) exceeds the number of wells on a 96-well plate ({_TOTAL_WELLS}).")
 
     rng = np.random.default_rng(seed)
     result = samples.copy()
@@ -99,9 +96,7 @@ def randomize_plates(
     # ------------------------------------------------------------------
     if keep_paired is not None:
         if keep_paired not in samples.columns:
-            raise ValueError(
-                f"Column '{keep_paired}' not found in the samples DataFrame."
-            )
+            raise ValueError(f"Column '{keep_paired}' not found in the samples DataFrame.")
         ordered_indices = _shuffle_paired(samples, keep_paired, plate_size, rng)
     else:
         ordered_indices = _shuffle_unpaired(samples, rng)
@@ -110,7 +105,13 @@ def randomize_plates(
     # Distribute indices across plates
     # ------------------------------------------------------------------
     plate_assignments, well_assignments = _assign_plates_and_wells(
-        ordered_indices, n_plates, plate_size, keep_paired is not None, samples, keep_paired, rng,
+        ordered_indices,
+        n_plates,
+        plate_size,
+        keep_paired is not None,
+        samples,
+        keep_paired,
+        rng,
     )
 
     result.loc[ordered_indices, "PlateNumber"] = plate_assignments
@@ -125,19 +126,16 @@ def randomize_plates(
 # Internal helpers
 # ======================================================================
 
+
 def _resolve_sample_id_column(df: pd.DataFrame) -> str:
     """Return the canonical sample-ID column name present in *df*."""
     for candidate in ("SampleID", "SampleId", "sampleid", "sample_id"):
         if candidate in df.columns:
             return candidate
-    raise ValueError(
-        "The samples DataFrame must contain a 'SampleID' or 'SampleId' column."
-    )
+    raise ValueError("The samples DataFrame must contain a 'SampleID' or 'SampleId' column.")
 
 
-def _shuffle_unpaired(
-    samples: pd.DataFrame, rng: np.random.Generator
-) -> np.ndarray:
+def _shuffle_unpaired(samples: pd.DataFrame, rng: np.random.Generator) -> np.ndarray:
     """Return a shuffled array of row indices."""
     indices = samples.index.to_numpy().copy()
     rng.shuffle(indices)
@@ -202,10 +200,7 @@ def _assign_plates_and_wells(
             # Identify the current group (consecutive indices with same paired value)
             group_val = samples.loc[ordered_indices[pos], paired_col]
             group_start = pos
-            while (
-                pos < len(ordered_indices)
-                and samples.loc[ordered_indices[pos], paired_col] == group_val
-            ):
+            while pos < len(ordered_indices) and samples.loc[ordered_indices[pos], paired_col] == group_val:
                 pos += 1
             group_size = pos - group_start
 
@@ -240,9 +235,7 @@ def _assign_plates_and_wells(
     return plate_numbers, well_positions
 
 
-def _pick_plate(
-    plate_counts: list[int], group_size: int, plate_size: int
-) -> int:
+def _pick_plate(plate_counts: list[int], group_size: int, plate_size: int) -> int:
     """Return the index of the plate best suited for a group of *group_size*.
 
     Prefers the plate with the fewest samples that still has enough room.
@@ -255,7 +248,6 @@ def _pick_plate(
             best_count = count
     if best is None:
         raise ValueError(
-            "Cannot fit all paired groups onto the available plates. "
-            "Consider increasing n_plates or plate_size."
+            "Cannot fit all paired groups onto the available plates. Consider increasing n_plates or plate_size."
         )
     return best
