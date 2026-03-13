@@ -1,0 +1,4 @@
+SampleId,PlateId,PlatePosition,SampleType,SeqId.10000-1,SeqId.10001-2,SeqId.10002-3
+S001,P1,A1,Sample,1234.5,5678.9,2345.6
+S002,P1,B1,Sample,1100.2,4567.8,3456.7
+S003,P1,C1,Sample,1567.3,6789.0,1234.5
