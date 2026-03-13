@@ -6,24 +6,20 @@ import pandas as pd
 import pytest
 
 from pyprideap.core import AffinityDataset, Platform
-from pyprideap.qc.compute import (
+from pyprideap.viz.qc.compute import (
     CorrelationData,
     CvDistributionData,
-    DetectionRateData,
+    DataCompletenessData,
     DistributionData,
     LodAnalysisData,
-    MissingFrequencyData,
-    MissingValuesData,
     PcaData,
     QcLodSummaryData,
     compute_all,
     compute_correlation,
     compute_cv_distribution,
-    compute_detection_rate,
+    compute_data_completeness,
     compute_distribution,
     compute_lod_analysis,
-    compute_missing_frequency,
-    compute_missing_values,
     compute_pca,
     compute_qc_summary,
 )
@@ -72,18 +68,17 @@ class TestDataclassSerialization:
         instances = [
             DistributionData(sample_ids=["S1"], sample_values=[[1.0]], xlabel="x"),
             QcLodSummaryData(categories=["PASS"], counts=[10]),
-            MissingFrequencyData(missing_freq=[0.1, 0.5]),
             LodAnalysisData(assay_ids=["A1"], above_lod_pct=[90.0], panel=["P1"]),
             PcaData(pc1=[1.0], pc2=[2.0], variance_explained=[0.5, 0.3], labels=["S1"], groups=["G1"]),
             CorrelationData(matrix=[[1.0]], labels=["S1"]),
-            MissingValuesData(
-                missing_rate_per_sample=[0.1],
-                missing_rate_per_feature=[0.2],
+            DataCompletenessData(
                 sample_ids=["S1"],
-                feature_ids=["F1"],
+                above_lod_rate=[0.8],
+                below_lod_rate=[0.2],
+                protein_ids=["P1"],
+                missing_freq=[0.1],
             ),
             CvDistributionData(feature_ids=["F1"], cv_values=[0.15]),
-            DetectionRateData(sample_ids=["S1"], rates=[0.95]),
         ]
         for inst in instances:
             serialized = json.dumps(asdict(inst))
@@ -104,19 +99,6 @@ class TestComputeDistribution:
         result = compute_distribution(ds)
         assert "log10" in result.xlabel.lower()
         assert len(result.sample_values) == 2
-
-
-class TestComputeMissingFrequency:
-    def test_no_missing(self):
-        ds = _make_olink_dataset()
-        result = compute_missing_frequency(ds)
-        assert all(f == 0.0 for f in result.missing_freq)
-
-    def test_with_missing(self):
-        ds = _make_olink_dataset()
-        ds.expression.iloc[0, 0] = np.nan
-        result = compute_missing_frequency(ds)
-        assert result.missing_freq[0] == 0.5
 
 
 class TestComputeQcSummary:
@@ -187,17 +169,28 @@ class TestComputeCorrelation:
             assert abs(result.matrix[i][i] - 1.0) < 1e-6
 
 
-class TestComputeMissingValues:
-    def test_no_missing_returns_zero_rates(self):
-        ds = _make_olink_dataset()
-        result = compute_missing_values(ds)
-        assert all(r == 0.0 for r in result.missing_rate_per_sample)
+class TestComputeDataCompleteness:
+    def test_no_lod_returns_none(self):
+        """SomaScan has no LOD sources, so should return None."""
+        ds = _make_somascan_dataset()
+        result = compute_data_completeness(ds)
+        assert result is None
 
-    def test_with_nans(self):
+    def test_with_reported_lod(self):
         ds = _make_olink_dataset()
-        ds.expression.iloc[0, 0] = np.nan
-        result = compute_missing_values(ds)
-        assert result.missing_rate_per_sample[0] > 0
+        ds.features["LOD"] = [3.0, 3.0]  # O1: 3.5>3, 4.1>3; O2: 2.0<3, -0.5<3
+        result = compute_data_completeness(ds)
+        assert result is not None
+        assert result.below_lod_rate[0] > 0  # sample 0 has O2 below LOD
+        assert result.above_lod_rate[0] + result.below_lod_rate[0] == pytest.approx(1.0)
+
+    def test_with_missing_freq(self):
+        ds = _make_olink_dataset()
+        ds.features["MissingFreq"] = [0.1, 0.5]  # 10% and 50% below LOD
+        result = compute_data_completeness(ds)
+        assert result is not None
+        assert result.missing_freq[0] == pytest.approx(0.1)
+        assert result.missing_freq[1] == pytest.approx(0.5)
 
 
 class TestComputeCvDistribution:
@@ -207,23 +200,11 @@ class TestComputeCvDistribution:
         assert result is not None
         assert len(result.cv_values) == 2
 
-    def test_olink_returns_none(self):
+    def test_olink_returns_cv(self):
         ds = _make_olink_dataset()
         result = compute_cv_distribution(ds)
-        assert result is None
-
-
-class TestComputeDetectionRate:
-    def test_full_detection(self):
-        ds = _make_olink_dataset()
-        result = compute_detection_rate(ds)
-        assert all(r == 1.0 for r in result.rates)
-
-    def test_partial_detection(self):
-        ds = _make_olink_dataset()
-        ds.expression.iloc[0, 0] = np.nan
-        result = compute_detection_rate(ds)
-        assert result.rates[0] == 0.5
+        assert result is not None
+        assert len(result.cv_values) == 2
 
 
 class TestComputeAll:
@@ -231,8 +212,7 @@ class TestComputeAll:
         ds = _make_olink_dataset()
         result = compute_all(ds)
         assert "distribution" in result
-        assert "missing_frequency" in result
-        assert "detection_rate" in result
+        assert "correlation" in result
 
     def test_somascan_includes_cv(self):
         ds = _make_somascan_dataset()

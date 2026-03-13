@@ -3,7 +3,7 @@
 import pandas as pd
 
 from pyprideap.core import AffinityDataset, Platform
-from pyprideap.filtering import filter_controls, filter_qc
+from pyprideap.processing.filtering import filter_controls, filter_qc
 
 
 def _make_dataset(sample_types=None, qc_values=None, n_features=3):

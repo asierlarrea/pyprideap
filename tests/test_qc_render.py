@@ -2,27 +2,29 @@ import pytest
 
 plotly = pytest.importorskip("plotly")
 
-from pyprideap.qc.compute import (  # noqa: E402
+from pyprideap.viz.qc.compute import (  # noqa: E402
     CorrelationData,
     CvDistributionData,
-    DetectionRateData,
+    DataCompletenessData,
     DistributionData,
+    HeatmapData,
     LodAnalysisData,
-    MissingFrequencyData,
-    MissingValuesData,
     PcaData,
     QcLodSummaryData,
+    UmapData,
+    VolcanoData,
 )
-from pyprideap.qc.render import (  # noqa: E402
+from pyprideap.viz.qc.render import (  # noqa: E402
     render_correlation,
     render_cv_distribution,
-    render_detection_rate,
+    render_data_completeness,
     render_distribution,
+    render_heatmap,
     render_lod_analysis,
-    render_missing_frequency,
-    render_missing_values,
     render_pca,
     render_qc_summary,
+    render_umap,
+    render_volcano,
 )
 
 
@@ -34,11 +36,6 @@ class TestRenderFunctions:
             xlabel="NPX Value",
         )
         fig = render_distribution(data)
-        assert fig is not None
-
-    def test_render_missing_frequency(self):
-        data = MissingFrequencyData(missing_freq=[0.0, 0.1, 0.3, 0.5, 1.0])
-        fig = render_missing_frequency(data)
         assert fig is not None
 
     def test_render_qc_summary_with_lod(self):
@@ -71,14 +68,15 @@ class TestRenderFunctions:
         fig = render_correlation(data)
         assert fig is not None
 
-    def test_render_missing_values(self):
-        data = MissingValuesData(
-            missing_rate_per_sample=[0.1, 0.2],
-            missing_rate_per_feature=[0.05, 0.15],
+    def test_render_data_completeness(self):
+        data = DataCompletenessData(
             sample_ids=["S1", "S2"],
-            feature_ids=["F1", "F2"],
+            above_lod_rate=[0.7, 0.8],
+            below_lod_rate=[0.3, 0.2],
+            protein_ids=["P1", "P2"],
+            missing_freq=[0.1, 0.4],
         )
-        fig = render_missing_values(data)
+        fig = render_data_completeness(data)
         assert fig is not None
 
     def test_render_cv_distribution(self):
@@ -86,7 +84,30 @@ class TestRenderFunctions:
         fig = render_cv_distribution(data)
         assert fig is not None
 
-    def test_render_detection_rate(self):
-        data = DetectionRateData(sample_ids=["S1", "S2"], rates=[0.9, 0.95])
-        fig = render_detection_rate(data)
+    def test_render_umap(self):
+        data = UmapData(x=[1.0, 2.0], y=[3.0, 4.0], labels=["S1", "S2"], groups=["A", "B"])
+        fig = render_umap(data)
+        assert fig is not None
+
+    def test_render_heatmap(self):
+        data = HeatmapData(
+            values=[[0.5, -0.3], [-0.5, 0.3]],
+            sample_labels=["S1", "S2"],
+            protein_labels=["P1", "P2"],
+            sample_order=[0, 1],
+            protein_order=[1, 0],
+        )
+        fig = render_heatmap(data)
+        assert fig is not None
+
+    def test_render_volcano(self):
+        data = VolcanoData(
+            protein_ids=["P1", "P2", "P3"],
+            assay_names=["A1", "A2", "A3"],
+            fold_change=[2.0, -1.5, 0.1],
+            neg_log10_pval=[3.0, 2.5, 0.5],
+            significant=[True, True, False],
+            direction=["up", "down", "ns"],
+        )
+        fig = render_volcano(data)
         assert fig is not None

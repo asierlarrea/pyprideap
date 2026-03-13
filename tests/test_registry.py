@@ -1,7 +1,7 @@
 import pytest
 
 from pyprideap.core import AffinityDataset, Platform
-from pyprideap.readers.registry import detect_format, read
+from pyprideap.io.readers.registry import detect_format, read
 
 
 class TestDetectFormat:
@@ -36,7 +36,7 @@ class TestAutoRead:
     def test_read_olink_csv(self, olink_csv_path):
         ds = read(olink_csv_path)
         assert isinstance(ds, AffinityDataset)
-        assert ds.platform == Platform.OLINK_EXPLORE
+        assert ds.platform == Platform.OLINK_TARGET
 
     def test_read_somascan_adat(self, somascan_adat_path):
         ds = read(somascan_adat_path)
@@ -44,12 +44,12 @@ class TestAutoRead:
 
     def test_read_parquet(self, olink_parquet_path):
         ds = read(olink_parquet_path)
-        assert ds.platform == Platform.OLINK_EXPLORE_HT
+        assert ds.platform == Platform.OLINK_TARGET
 
     def test_read_xlsx(self, olink_xlsx_path):
         ds = read(olink_xlsx_path)
         assert isinstance(ds, AffinityDataset)
-        assert ds.platform == Platform.OLINK_EXPLORE
+        assert ds.platform == Platform.OLINK_TARGET
 
     def test_read_somascan_csv(self, somascan_csv_path):
         ds = read(somascan_csv_path)

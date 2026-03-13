@@ -3,7 +3,7 @@ import pandas as pd
 import pytest
 
 from pyprideap.core import AffinityDataset, Platform
-from pyprideap.stats import compute_stats
+from pyprideap.stats.descriptive import compute_stats
 
 
 def _make_dataset():

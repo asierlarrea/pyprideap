@@ -2,9 +2,9 @@ import numpy as np
 import pandas as pd
 
 from pyprideap.core import AffinityDataset, Level, Platform
-from pyprideap.validators.olink_explore import OlinkExploreValidator
-from pyprideap.validators.olink_target import OlinkTargetValidator
-from pyprideap.validators.somascan import SomaScanValidator
+from pyprideap.io.validators.olink_explore import OlinkExploreValidator
+from pyprideap.io.validators.olink_target import OlinkTargetValidator
+from pyprideap.io.validators.somascan import SomaScanValidator
 
 
 def _make_olink_dataset(**overrides) -> AffinityDataset:

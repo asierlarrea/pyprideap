@@ -9,6 +9,7 @@ import pandas as pd
 class Platform(Enum):
     OLINK_EXPLORE = "olink_explore"
     OLINK_EXPLORE_HT = "olink_explore_ht"
+    OLINK_REVEAL = "olink_reveal"
     OLINK_TARGET = "olink_target"
     SOMASCAN = "somascan"
 

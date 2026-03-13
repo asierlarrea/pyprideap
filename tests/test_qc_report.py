@@ -5,7 +5,7 @@ pytest.importorskip("plotly")
 import pandas as pd
 
 from pyprideap.core import AffinityDataset, Platform
-from pyprideap.qc.report import qc_report
+from pyprideap.viz.qc.report import qc_report
 
 
 def _make_dataset():
@@ -81,3 +81,28 @@ class TestQcReport:
         assert result.exists()
         content = result.read_text()
         assert "Somascan" in content
+
+    def test_contains_pride_embedded_css(self, tmp_path):
+        ds = _make_dataset()
+        output = tmp_path / "report.html"
+        qc_report(ds, output)
+        content = output.read_text()
+        assert "pride-embedded" in content
+        assert "#5bc0be" in content  # PRIDE primary teal
+
+    def test_contains_postmessage_js(self, tmp_path):
+        ds = _make_dataset()
+        output = tmp_path / "report.html"
+        qc_report(ds, output)
+        content = output.read_text()
+        assert "pride-qc-resize" in content
+        assert "ResizeObserver" in content
+        assert "window.parent.postMessage" in content
+
+    def test_contains_empty_fallback(self, tmp_path):
+        ds = _make_dataset()
+        output = tmp_path / "report.html"
+        qc_report(ds, output)
+        content = output.read_text()
+        assert "pride-embedded-empty" in content
+        assert "No QC plots available" in content

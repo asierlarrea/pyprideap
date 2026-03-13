@@ -1,0 +1,724 @@
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+from pyprideap.viz.qc.compute import (
+    CorrelationData,
+    CvDistributionData,
+    DataCompletenessData,
+    DistributionData,
+    HeatmapData,
+    LodAnalysisData,
+    LodComparisonData,
+    NormScaleData,
+    PcaData,
+    PlateCvData,
+    QcLodSummaryData,
+    UmapData,
+    VolcanoData,
+)
+
+if TYPE_CHECKING:
+    from plotly.graph_objects import Figure
+
+
+def _import_plotly():
+    try:
+        import plotly.express as px
+        import plotly.graph_objects as go
+
+        return go, px
+    except ImportError:
+        raise ImportError("Plotly is required for rendering. Install with: pip install pyprideap[plots]") from None
+
+
+_QC_LOD_COLORS = {
+    "PASS & NPX > LOD": "#2ecc71",
+    "PASS & NPX ≤ LOD": "#3498db",
+    "WARN & NPX > LOD": "#f39c12",
+    "WARN & NPX ≤ LOD": "#e74c3c",
+    "FAIL & NPX > LOD": "#95a5a6",
+    "FAIL & NPX ≤ LOD": "#7f8c8d",
+    "PASS": "#2ecc71",
+    "WARN": "#f39c12",
+    "FAIL": "#e74c3c",
+    "NA": "#95a5a6",
+}
+
+
+def render_distribution(data: DistributionData) -> Figure:
+    """Per-sample overlaid density curves (KDE-like via histograms with histnorm)."""
+    go, _ = _import_plotly()
+    fig = go.Figure()
+
+    for sid, vals in zip(data.sample_ids, data.sample_values):
+        if len(vals) == 0:
+            continue
+        fig.add_trace(
+            go.Histogram(
+                x=vals,
+                name=sid,
+                opacity=0.6,
+                nbinsx=80,
+                histnorm="",
+            )
+        )
+
+    fig.update_layout(
+        title=data.title,
+        xaxis_title=data.xlabel,
+        yaxis_title=data.ylabel,
+        barmode="overlay",
+        legend_title="Sample",
+    )
+    return fig
+
+
+
+def render_qc_summary(data: QcLodSummaryData) -> Figure:
+    """QC × LOD stacked bar or simple QC bar chart."""
+    go, _ = _import_plotly()
+
+    total = sum(data.counts)
+    colors = [_QC_LOD_COLORS.get(c, "#3498db") for c in data.categories]
+
+    fig = go.Figure()
+    cumulative = 0.0
+    for cat, cnt, color in zip(data.categories, data.counts, colors):
+        pct = cnt / total * 100 if total > 0 else 0
+        fig.add_trace(
+            go.Bar(
+                x=["Samples"],
+                y=[pct],
+                name=f"{cat} {cnt} ({pct:.1f}%)",
+                marker_color=color,
+                text=f"{pct:.1f}%",
+                textposition="inside",
+            )
+        )
+        cumulative += pct
+
+    fig.update_layout(
+        title=data.title,
+        barmode="stack",
+        yaxis_title="% of Measurements",
+        yaxis=dict(range=[0, 100], ticksuffix="%"),
+        legend=dict(orientation="h", yanchor="bottom", y=-0.3),
+    )
+    return fig
+
+
+def render_lod_analysis(data: LodAnalysisData) -> Figure:
+    go, px = _import_plotly()
+    import pandas as pd
+    from plotly.subplots import make_subplots
+
+    df = pd.DataFrame({"Assay": data.assay_ids, "% Above LOD": data.above_lod_pct, "Panel": data.panel})
+    df = df.sort_values("% Above LOD", ascending=False).reset_index(drop=True)
+    df["Rank"] = range(1, len(df) + 1)
+
+    fig = make_subplots(
+        rows=2, cols=1,
+        subplot_titles=["Proteins Ranked by Detectability", "Detectability Distribution"],
+        vertical_spacing=0.22,
+    )
+
+    panels = sorted(df["Panel"].unique())
+    colors = px.colors.qualitative.Set2
+    panel_colors = {p: colors[i % len(colors)] for i, p in enumerate(panels)}
+
+    for panel in panels:
+        sub = df[df["Panel"] == panel]
+        fig.add_trace(
+            go.Scatter(
+                x=sub["Rank"],
+                y=sub["% Above LOD"],
+                mode="markers",
+                marker=dict(size=4, color=panel_colors[panel]),
+                name=panel,
+                text=sub["Assay"],
+                hovertemplate="%{text}<br>%{y:.1f}% above LOD<extra></extra>",
+            ),
+            row=1, col=1,
+        )
+
+    fig.add_trace(
+        go.Histogram(
+            x=df["% Above LOD"],
+            nbinsx=20,
+            marker_color="#3498db",
+            showlegend=False,
+        ),
+        row=2, col=1,
+    )
+
+    fig.update_xaxes(title_text="Protein Rank (by detectability)", row=1, col=1)
+    fig.update_yaxes(title_text="% Samples with NPX > LOD", row=1, col=1)
+    fig.update_xaxes(title_text="% Samples with NPX > LOD", row=2, col=1)
+    fig.update_yaxes(title_text="Number of Proteins", row=2, col=1)
+    fig.update_layout(title=data.title, height=800, legend=dict(orientation="h", yanchor="bottom", y=-0.15))
+    return fig
+
+
+def render_pca(data: PcaData) -> Figure:
+    _, px = _import_plotly()
+    import pandas as pd
+
+    df = pd.DataFrame({"PC1": data.pc1, "PC2": data.pc2, "Label": data.labels, "Group": data.groups})
+    ve = data.variance_explained
+    fig = px.scatter(
+        df,
+        x="PC1",
+        y="PC2",
+        color="Group",
+        text="Label",
+        hover_data=["Label"],
+        title=data.title,
+        labels={
+            "PC1": f"PC1 ({ve[0] * 100:.1f}%)" if len(ve) > 0 else "PC1",
+            "PC2": f"PC2 ({ve[1] * 100:.1f}%)" if len(ve) > 1 else "PC2",
+        },
+    )
+    fig.update_traces(textposition="top center", marker=dict(size=10))
+    return fig
+
+
+def render_umap(data: UmapData) -> Figure:
+    _, px = _import_plotly()
+    import pandas as pd
+
+    df = pd.DataFrame({"UMAP1": data.x, "UMAP2": data.y, "Label": data.labels, "Group": data.groups})
+    fig = px.scatter(
+        df,
+        x="UMAP1",
+        y="UMAP2",
+        color="Group",
+        text="Label",
+        hover_data=["Label"],
+        title="UMAP Projection",
+    )
+    fig.update_traces(textposition="top center", marker=dict(size=10))
+    return fig
+
+
+def render_dimreduction(pca_data: PcaData | None, umap_data: UmapData | None) -> Figure | None:
+    """Combined PCA/UMAP plot with dropdown toggle between the two methods.
+
+    If only one method produced data, renders that alone without a dropdown.
+    Returns None if neither is available.
+    """
+    if pca_data is None and umap_data is None:
+        return None
+
+    go, _ = _import_plotly()
+
+    fig = go.Figure()
+    pca_trace_range: tuple[int, int] = (0, 0)
+    umap_trace_range: tuple[int, int] = (0, 0)
+
+    # --- PCA traces ---
+    if pca_data is not None:
+        ve = pca_data.variance_explained
+        pca_start = len(fig.data)
+        groups = sorted(set(pca_data.groups))
+        from pyprideap.viz.theme import pride_color_discrete
+        colors = pride_color_discrete(len(groups))
+        color_map = {g: colors[i] for i, g in enumerate(groups)}
+
+        for group in groups:
+            mask = [i for i, g in enumerate(pca_data.groups) if g == group]
+            fig.add_trace(go.Scatter(
+                x=[pca_data.pc1[i] for i in mask],
+                y=[pca_data.pc2[i] for i in mask],
+                mode="markers+text",
+                marker=dict(size=10, color=color_map[group]),
+                text=[pca_data.labels[i] for i in mask],
+                textposition="top center",
+                name=group,
+                hovertemplate="%{text}<extra></extra>",
+                visible=True,
+            ))
+        pca_trace_range = (pca_start, len(fig.data))
+
+    # --- UMAP traces ---
+    if umap_data is not None:
+        umap_start = len(fig.data)
+        groups = sorted(set(umap_data.groups))
+        from pyprideap.viz.theme import pride_color_discrete
+        colors = pride_color_discrete(len(groups))
+        color_map = {g: colors[i] for i, g in enumerate(groups)}
+        show_umap = pca_data is None  # visible by default only if no PCA
+
+        for group in groups:
+            mask = [i for i, g in enumerate(umap_data.groups) if g == group]
+            fig.add_trace(go.Scatter(
+                x=[umap_data.x[i] for i in mask],
+                y=[umap_data.y[i] for i in mask],
+                mode="markers+text",
+                marker=dict(size=10, color=color_map[group]),
+                text=[umap_data.labels[i] for i in mask],
+                textposition="top center",
+                name=group,
+                hovertemplate="%{text}<extra></extra>",
+                visible=show_umap,
+                showlegend=show_umap,
+            ))
+        umap_trace_range = (umap_start, len(fig.data))
+
+    # --- Dropdown toggle (only if both available) ---
+    if pca_data is not None and umap_data is not None:
+        ve = pca_data.variance_explained
+        n_traces = len(fig.data)
+
+        pca_vis = [False] * n_traces
+        for t in range(pca_trace_range[0], pca_trace_range[1]):
+            pca_vis[t] = True
+
+        umap_vis = [False] * n_traces
+        for t in range(umap_trace_range[0], umap_trace_range[1]):
+            umap_vis[t] = True
+
+        fig.update_layout(
+            updatemenus=[dict(
+                type="dropdown",
+                direction="down",
+                x=0.0, xanchor="left",
+                y=1.15, yanchor="top",
+                active=0,
+                buttons=[
+                    dict(
+                        label="PCA",
+                        method="update",
+                        args=[
+                            {"visible": pca_vis},
+                            {
+                                "xaxis.title.text": f"PC1 ({ve[0] * 100:.1f}%)" if len(ve) > 0 else "PC1",
+                                "yaxis.title.text": f"PC2 ({ve[1] * 100:.1f}%)" if len(ve) > 1 else "PC2",
+                                "title.text": "Dimensionality Reduction — PCA",
+                            },
+                        ],
+                    ),
+                    dict(
+                        label="UMAP",
+                        method="update",
+                        args=[
+                            {"visible": umap_vis},
+                            {
+                                "xaxis.title.text": "UMAP1",
+                                "yaxis.title.text": "UMAP2",
+                                "title.text": "Dimensionality Reduction — UMAP",
+                            },
+                        ],
+                    ),
+                ],
+            )],
+        )
+
+    # Set initial axis labels and title
+    if pca_data is not None:
+        ve = pca_data.variance_explained
+        fig.update_layout(
+            title="Dimensionality Reduction — PCA",
+            xaxis_title=f"PC1 ({ve[0] * 100:.1f}%)" if len(ve) > 0 else "PC1",
+            yaxis_title=f"PC2 ({ve[1] * 100:.1f}%)" if len(ve) > 1 else "PC2",
+        )
+    else:
+        fig.update_layout(
+            title="Dimensionality Reduction — UMAP",
+            xaxis_title="UMAP1",
+            yaxis_title="UMAP2",
+        )
+
+    return fig
+
+
+def render_heatmap(data: HeatmapData) -> Figure:
+    """Clustered expression heatmap (z-scored) with reordered rows/columns."""
+    go, _ = _import_plotly()
+    import numpy as np
+
+    z = np.array(data.values)
+    z_ordered = z[data.sample_order][:, data.protein_order]
+    sample_labels = [data.sample_labels[i] for i in data.sample_order]
+    protein_labels = [data.protein_labels[i] for i in data.protein_order]
+
+    fig = go.Figure(
+        data=go.Heatmap(
+            z=z_ordered,
+            x=protein_labels,
+            y=sample_labels,
+            colorscale="RdBu_r",
+            zmid=0,
+            colorbar=dict(title="Z-score"),
+        )
+    )
+    fig.update_layout(
+        title=data.title,
+        xaxis_title="Proteins",
+        yaxis_title="Samples",
+        xaxis=dict(showticklabels=len(protein_labels) <= 50),
+        yaxis=dict(autorange="reversed"),
+    )
+    return fig
+
+
+def render_correlation(data: CorrelationData) -> Figure:
+    go, _ = _import_plotly()
+    fig = go.Figure(
+        data=go.Heatmap(
+            z=data.matrix,
+            x=data.labels,
+            y=data.labels,
+            colorscale="RdBu_r",
+            zmin=-1,
+            zmax=1,
+        )
+    )
+    fig.update_layout(
+        title=data.title,
+        xaxis_title="Sample",
+        yaxis_title="Sample",
+    )
+    return fig
+
+
+def render_data_completeness(data: DataCompletenessData) -> Figure:
+    """Per-sample stacked bar (above LOD / below LOD) + per-protein missing frequency histogram."""
+    go, _ = _import_plotly()
+    from plotly.subplots import make_subplots
+
+    fig = make_subplots(
+        rows=2, cols=1,
+        subplot_titles=["Per-Sample Data Completeness", "Missing Frequency Distribution"],
+        vertical_spacing=0.22,
+    )
+
+    # Top panel: stacked bar per sample
+    fig.add_trace(
+        go.Bar(
+            x=data.sample_ids,
+            y=[r * 100 for r in data.above_lod_rate],
+            name="Above LOD",
+            marker_color="#2ecc71",
+        ),
+        row=1, col=1,
+    )
+    fig.add_trace(
+        go.Bar(
+            x=data.sample_ids,
+            y=[r * 100 for r in data.below_lod_rate],
+            name="Below LOD",
+            marker_color="#f39c12",
+        ),
+        row=1, col=1,
+    )
+
+    fig.update_xaxes(title_text="Sample", row=1, col=1)
+    fig.update_yaxes(title_text="% of Proteins", range=[0, 100], ticksuffix="%", row=1, col=1)
+    fig.update_layout(barmode="stack")
+
+    # Bottom panel: histogram of per-protein missing frequency
+    if data.missing_freq:
+        missing_pct = [f * 100 for f in data.missing_freq]
+        fig.add_trace(
+            go.Histogram(
+                x=missing_pct,
+                nbinsx=25,
+                marker_color="#e74c3c",
+                showlegend=False,
+            ),
+            row=2, col=1,
+        )
+    fig.update_xaxes(title_text="% Samples Below LOD", range=[0, 100], row=2, col=1)
+    fig.update_yaxes(title_text="Number of Proteins", row=2, col=1)
+
+    fig.update_layout(
+        title=data.title,
+        height=800,
+        legend=dict(orientation="h", yanchor="bottom", y=-0.15),
+    )
+    return fig
+
+
+def render_cv_distribution(data: CvDistributionData) -> Figure:
+    go, _ = _import_plotly()
+    fig = go.Figure(data=[go.Histogram(x=data.cv_values, nbinsx=50)])
+    fig.update_layout(title=data.title, xaxis_title="Coefficient of Variation (%)", yaxis_title="Number of Proteins")
+    return fig
+
+
+def render_plate_cv(data: PlateCvData) -> Figure:
+    """Two-panel plot: intra-plate CV per plate (top) and inter-plate CV (bottom)."""
+    go, _ = _import_plotly()
+    from plotly.subplots import make_subplots
+    import numpy as np
+
+    fig = make_subplots(
+        rows=2, cols=1,
+        subplot_titles=["Intra-plate CV (per plate)", "Inter-plate CV (across plates)"],
+        vertical_spacing=0.22,
+    )
+
+    plates = data.plate_ids if data.plate_ids else sorted(set(data.intra_plate_label))
+
+    from pyprideap.viz.theme import pride_color_discrete
+    colors = pride_color_discrete(len(plates))
+
+    # Top: intra-plate CV — one violin per plate
+    for i, plate in enumerate(plates):
+        vals = [v for v, p in zip(data.intra_cv, data.intra_plate_label) if p == plate]
+        if not vals:
+            continue
+        fig.add_trace(go.Violin(
+            x=[plate] * len(vals),
+            y=vals,
+            name=plate,
+            marker_color=colors[i],
+            box_visible=True,
+            meanline_visible=True,
+            scalemode="width",
+        ), row=1, col=1)
+
+    # Bottom: inter-plate CV — single violin
+    if data.inter_cv:
+        fig.add_trace(go.Violin(
+            x=["All analytes"] * len(data.inter_cv),
+            y=data.inter_cv,
+            name="Inter-plate",
+            marker_color="#e74c3c",
+            box_visible=True,
+            meanline_visible=True,
+            scalemode="width",
+            showlegend=True,
+        ), row=2, col=1)
+
+        median_val = float(np.median(data.inter_cv))
+        fig.add_annotation(
+            x="All analytes", y=median_val,
+            text=f"median: {median_val:.3f}",
+            showarrow=True, arrowhead=2,
+            font=dict(size=11, color="#333"),
+            bgcolor="rgba(255,255,255,0.8)",
+            row=2, col=1,
+        )
+
+    fig.update_yaxes(title_text="CV (SD / Mean)", row=1, col=1)
+    fig.update_yaxes(title_text="CV (SD / Mean)", row=2, col=1)
+    fig.update_layout(
+        title=data.title,
+        height=800,
+        legend=dict(orientation="h", yanchor="bottom", y=-0.1),
+    )
+    return fig
+
+
+def render_norm_scale(data: NormScaleData) -> Figure:
+    """HybControlNormScale per sample, sorted, colored by plate, with threshold lines."""
+    go, _ = _import_plotly()
+    import pandas as pd
+
+    df = pd.DataFrame({
+        "Sample": data.sample_ids,
+        "NormScale": data.values,
+        "Plate": data.plate_ids if data.plate_ids else [""] * len(data.sample_ids),
+    }).dropna(subset=["NormScale"]).sort_values("NormScale").reset_index(drop=True)
+    df["Rank"] = range(1, len(df) + 1)
+
+    fig = go.Figure()
+
+    if df["Plate"].nunique() > 1:
+        from pyprideap.viz.theme import pride_color_discrete
+        plates = sorted(df["Plate"].unique())
+        colors = pride_color_discrete(len(plates))
+        plate_colors = {p: colors[i] for i, p in enumerate(plates)}
+        for plate in plates:
+            sub = df[df["Plate"] == plate]
+            fig.add_trace(go.Scatter(
+                x=sub["Rank"], y=sub["NormScale"],
+                mode="markers", marker=dict(size=7, color=plate_colors[plate]),
+                name=plate, text=sub["Sample"],
+                hovertemplate="%{text}<br>NormScale: %{y:.4f}<extra></extra>",
+            ))
+    else:
+        fig.add_trace(go.Scatter(
+            x=df["Rank"], y=df["NormScale"],
+            mode="markers", marker=dict(size=7, color="#5bc0be"),
+            name="Samples", text=df["Sample"],
+            hovertemplate="%{text}<br>NormScale: %{y:.4f}<extra></extra>",
+        ))
+
+    # Threshold lines
+    thresholds = [
+        (0.4, "red", "dash", "0.4 (fail)"),
+        (0.8, "orange", "dot", "0.8 (warn)"),
+        (1.0, "#2ecc71", "solid", "1.0 (ideal)"),
+        (1.2, "orange", "dot", "1.2 (warn)"),
+        (2.5, "red", "dash", "2.5 (fail)"),
+    ]
+    for val, color, dash, label in thresholds:
+        fig.add_hline(y=val, line_dash=dash, line_color=color, line_width=1.5,
+                      annotation_text=label, annotation_position="right")
+
+    fig.update_layout(
+        title=data.title,
+        xaxis_title="Sample Rank (sorted by NormScale)",
+        yaxis_title="HybControlNormScale",
+        legend=dict(orientation="h", yanchor="bottom", y=-0.2),
+    )
+    return fig
+
+
+def render_lod_comparison(data: LodComparisonData) -> Figure:
+    """Scatter plots comparing pairs of LOD sources with dropdown selector."""
+    go, px = _import_plotly()
+    import numpy as np
+
+    fig = go.Figure()
+
+    # Add traces for each pair; only the first pair is visible by default
+    trace_ranges: list[tuple[int, int]] = []  # (start_idx, end_idx) per pair
+    for pair_idx, pair in enumerate(data.pairs):
+        visible = pair_idx == 0
+        panels = pair["panels"]
+        unique_panels = sorted(set(panels)) if panels else [""]
+        colors = px.colors.qualitative.Set2
+        panel_colors = {p: colors[i % len(colors)] for i, p in enumerate(unique_panels)}
+
+        start = len(fig.data)
+        for panel in unique_panels:
+            mask = [i for i, p in enumerate(panels) if p == panel]
+            fig.add_trace(go.Scatter(
+                x=[pair["values_x"][i] for i in mask],
+                y=[pair["values_y"][i] for i in mask],
+                mode="markers",
+                marker=dict(size=5, color=panel_colors[panel], opacity=0.7),
+                name=panel if panel else "Protein",
+                text=[pair["assay_ids"][i] for i in mask],
+                hovertemplate=(
+                    "%{text}<br>"
+                    f"{pair['name_x']}: %{{x:.3f}}<br>"
+                    f"{pair['name_y']}: %{{y:.3f}}"
+                    "<extra></extra>"
+                ),
+                visible=visible,
+                showlegend=visible,
+            ))
+        end = len(fig.data)
+        trace_ranges.append((start, end))
+
+        # Add identity line for the first visible pair
+        if visible:
+            all_vals = pair["values_x"] + pair["values_y"]
+            vmin = min(all_vals)
+            vmax = max(all_vals)
+            margin = (vmax - vmin) * 0.05
+            fig.add_trace(go.Scatter(
+                x=[vmin - margin, vmax + margin],
+                y=[vmin - margin, vmax + margin],
+                mode="lines",
+                line=dict(dash="dash", color="gray", width=1),
+                showlegend=False,
+                hoverinfo="skip",
+                visible=True,
+            ))
+            identity_idx = len(fig.data) - 1
+
+            # Compute correlation
+            r = float(np.corrcoef(pair["values_x"], pair["values_y"])[0, 1])
+            fig.add_annotation(
+                x=0.02, y=0.98, xref="paper", yref="paper",
+                text=f"r = {r:.3f}  (n = {len(pair['assay_ids'])})",
+                showarrow=False, font=dict(size=13),
+                bgcolor="rgba(255,255,255,0.8)",
+                bordercolor="#ccc", borderwidth=1,
+            )
+
+    # Build dropdown buttons if multiple pairs
+    if len(data.pairs) > 1:
+        buttons = []
+        for pair_idx, pair in enumerate(data.pairs):
+            label = f"{pair['name_x']} vs {pair['name_y']}"
+            visibility = [False] * len(fig.data)
+            start, end = trace_ranges[pair_idx]
+            for t in range(start, end):
+                visibility[t] = True
+
+            # Compute identity line and annotation for this pair
+            all_vals = pair["values_x"] + pair["values_y"]
+            vmin, vmax = min(all_vals), max(all_vals)
+            margin = (vmax - vmin) * 0.05
+            r = float(np.corrcoef(pair["values_x"], pair["values_y"])[0, 1])
+
+            # Also show the identity line trace
+            visibility[identity_idx] = True
+
+            buttons.append(dict(
+                label=label,
+                method="update",
+                args=[
+                    {"visible": visibility,
+                     "x": [None] * start + [None] * (end - start) + [None] * (len(fig.data) - end - 1) + [[vmin - margin, vmax + margin]],
+                     "y": [None] * start + [None] * (end - start) + [None] * (len(fig.data) - end - 1) + [[vmin - margin, vmax + margin]],
+                     },
+                    {"xaxis.title.text": f"{pair['name_x']} (NPX)",
+                     "yaxis.title.text": f"{pair['name_y']} (NPX)",
+                     "annotations": [dict(
+                         x=0.02, y=0.98, xref="paper", yref="paper",
+                         text=f"r = {r:.3f}  (n = {len(pair['assay_ids'])})",
+                         showarrow=False, font=dict(size=13),
+                         bgcolor="rgba(255,255,255,0.8)",
+                         bordercolor="#ccc", borderwidth=1,
+                     )],
+                     },
+                ],
+            ))
+
+        fig.update_layout(
+            updatemenus=[dict(
+                type="dropdown",
+                direction="down",
+                x=0.0, xanchor="left",
+                y=1.15, yanchor="top",
+                buttons=buttons,
+                active=0,
+            )],
+        )
+
+    first = data.pairs[0]
+    fig.update_layout(
+        title=data.title,
+        xaxis_title=f"{first['name_x']} (NPX)",
+        yaxis_title=f"{first['name_y']} (NPX)",
+    )
+    return fig
+
+
+def render_volcano(data: VolcanoData) -> Figure:
+    """Volcano plot: fold change (x) vs -log10 adjusted p-value (y)."""
+    go, _ = _import_plotly()
+
+    _DIR_COLORS = {"up": "#e74c3c", "down": "#3498db", "ns": "#95a5a6"}
+    _DIR_NAMES = {"up": "Up-regulated", "down": "Down-regulated", "ns": "Not significant"}
+
+    fig = go.Figure()
+    for direction in ["up", "down", "ns"]:
+        mask = [i for i, d in enumerate(data.direction) if d == direction]
+        if not mask:
+            continue
+        fig.add_trace(go.Scatter(
+            x=[data.fold_change[i] for i in mask],
+            y=[data.neg_log10_pval[i] for i in mask],
+            mode="markers",
+            marker=dict(size=6, color=_DIR_COLORS[direction], opacity=0.7),
+            name=_DIR_NAMES[direction],
+            text=[data.assay_names[i] for i in mask],
+            hovertemplate="%{text}<br>FC: %{x:.3f}<br>-log10(p): %{y:.2f}<extra></extra>",
+        ))
+
+    fig.update_layout(
+        title=data.title,
+        xaxis_title="Fold Change (log2)",
+        yaxis_title="-log10(adjusted p-value)",
+        legend=dict(orientation="h", yanchor="bottom", y=-0.25),
+    )
+    return fig

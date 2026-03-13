@@ -3,18 +3,18 @@ from pathlib import Path
 import pytest
 
 from pyprideap.core import AffinityDataset, Platform
-from pyprideap.readers.olink_csv import read_olink_csv
-from pyprideap.readers.olink_parquet import read_olink_parquet
-from pyprideap.readers.olink_xlsx import read_olink_xlsx
-from pyprideap.readers.somascan_adat import read_somascan_adat
-from pyprideap.readers.somascan_csv import read_somascan_csv
+from pyprideap.io.readers.olink_csv import read_olink_csv
+from pyprideap.io.readers.olink_parquet import read_olink_parquet
+from pyprideap.io.readers.olink_xlsx import read_olink_xlsx
+from pyprideap.io.readers.somascan_adat import read_somascan_adat
+from pyprideap.io.readers.somascan_csv import read_somascan_csv
 
 
 class TestOlinkCsvReader:
     def test_returns_affinity_dataset(self, olink_csv_path):
         ds = read_olink_csv(olink_csv_path)
         assert isinstance(ds, AffinityDataset)
-        assert ds.platform == Platform.OLINK_EXPLORE
+        assert ds.platform == Platform.OLINK_TARGET
 
     def test_samples_extracted(self, olink_csv_path):
         ds = read_olink_csv(olink_csv_path)
@@ -53,7 +53,7 @@ class TestOlinkParquetReader:
     def test_returns_affinity_dataset(self, olink_parquet_path):
         ds = read_olink_parquet(olink_parquet_path)
         assert isinstance(ds, AffinityDataset)
-        assert ds.platform == Platform.OLINK_EXPLORE_HT
+        assert ds.platform == Platform.OLINK_TARGET
 
     def test_samples_extracted(self, olink_parquet_path):
         ds = read_olink_parquet(olink_parquet_path)

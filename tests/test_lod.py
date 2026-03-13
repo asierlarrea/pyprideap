@@ -5,11 +5,14 @@ import pandas as pd
 import pytest
 
 from pyprideap.core import AffinityDataset, Platform
-from pyprideap.lod import (
+from pyprideap.processing.lod import (
     LodMethod,
+    _MAD_TO_SD,
     _MIN_STD_FLOOR,
+    _SOMA_ELOD_K,
     compute_lod_from_controls,
     compute_lod_stats,
+    compute_soma_elod,
     get_lod_values,
     get_reported_lod,
     get_valid_proteins,
@@ -347,3 +350,111 @@ class TestLodMethodDispatch:
         ds = _make_olink_dataset(lod_values=[1.0, 2.0, 3.0])
         assert get_lod_values(ds, method="REPORTED") is not None
         assert get_lod_values(ds, method="NCLOD") is not None
+
+    def test_soma_elod_method(self):
+        ds = _make_somascan_dataset_with_buffers()
+        lod = get_lod_values(ds, method="SOMA_ELOD")
+        assert lod is not None
+        assert len(lod) == 3
+
+    def test_soma_elod_returns_none_without_buffers(self):
+        ds = _make_somascan_dataset_with_buffers()
+        # Remove buffer samples
+        ds.samples["SampleType"] = "Sample"
+        lod = get_lod_values(ds, method=LodMethod.SOMA_ELOD)
+        assert lod is None
+
+
+# ---------------------------------------------------------------------------
+# SomaScan eLOD
+# ---------------------------------------------------------------------------
+
+_N_BUFFERS = 10
+
+
+def _make_somascan_dataset_with_buffers(
+    n_bio=5,
+    n_buffers=_N_BUFFERS,
+    n_features=3,
+):
+    """Build a SomaScan dataset with buffer samples for eLOD testing."""
+    n_samples = n_bio + n_buffers
+    samples = pd.DataFrame({
+        "SampleId": [f"S{i}" for i in range(n_samples)],
+        "SampleType": ["Sample"] * n_bio + ["Buffer"] * n_buffers,
+    })
+
+    features = pd.DataFrame({
+        "SeqId": [f"10000-{i}" for i in range(n_features)],
+        "UniProt": [f"P{i}" for i in range(n_features)],
+        "Target": [f"T{i}" for i in range(n_features)],
+        "Dilution": ["20"] * n_features,
+    })
+
+    rng = np.random.default_rng(42)
+    expr_data = np.empty((n_samples, n_features))
+    # Biological: high RFU
+    expr_data[:n_bio, :] = rng.normal(5000.0, 1000.0, size=(n_bio, n_features))
+    # Buffer: low RFU (background signal)
+    expr_data[n_bio:, :] = rng.normal(100.0, 20.0, size=(n_buffers, n_features))
+    # Ensure all positive (RFU)
+    expr_data = np.abs(expr_data)
+
+    expression = pd.DataFrame(
+        expr_data,
+        columns=[f"SL{i}" for i in range(n_features)],
+    )
+
+    return AffinityDataset(
+        platform=Platform.SOMASCAN,
+        samples=samples,
+        features=features,
+        expression=expression,
+        metadata={"AssayVersion": "v4.1", "AssayType": "SomaScan"},
+    )
+
+
+class TestComputeSomaElod:
+    def test_computes_elod_from_buffers(self):
+        ds = _make_somascan_dataset_with_buffers()
+        lod = compute_soma_elod(ds)
+        assert len(lod) == 3
+        assert all(np.isfinite(lod))
+        # eLOD should be higher than buffer median (added positive offset)
+        buffer_medians = ds.expression.iloc[5:].median()
+        for col in ds.expression.columns:
+            assert lod[col] > buffer_medians[col]
+
+    def test_elod_formula_matches_somadataio(self):
+        """Verify: eLOD = median + 3.3 * 1.4826 * MAD."""
+        ds = _make_somascan_dataset_with_buffers()
+        lod = compute_soma_elod(ds)
+
+        buffer_expr = ds.expression.iloc[5:].apply(pd.to_numeric, errors="coerce")
+        for col in ds.expression.columns:
+            vals = buffer_expr[col]
+            med = vals.median()
+            mad = (vals - med).abs().median()
+            expected = med + _SOMA_ELOD_K * _MAD_TO_SD * mad
+            assert abs(lod[col] - expected) < 1e-10
+
+    def test_elod_with_constant_buffer(self):
+        """When all buffer values are identical, MAD=0 so eLOD = median."""
+        ds = _make_somascan_dataset_with_buffers()
+        # Set all buffer RFU to constant
+        ds.expression.iloc[5:] = 100.0
+        lod = compute_soma_elod(ds)
+        for col in ds.expression.columns:
+            assert abs(lod[col] - 100.0) < 1e-10
+
+    def test_raises_without_buffer_samples(self):
+        ds = _make_somascan_dataset_with_buffers()
+        ds.samples["SampleType"] = "Sample"
+        with pytest.raises(ValueError, match="buffer"):
+            compute_soma_elod(ds)
+
+    def test_raises_without_sample_type(self):
+        ds = _make_somascan_dataset_with_buffers()
+        ds.samples = ds.samples.drop(columns=["SampleType"])
+        with pytest.raises(ValueError, match="SampleType"):
+            compute_soma_elod(ds)

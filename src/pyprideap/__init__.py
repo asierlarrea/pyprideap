@@ -3,42 +3,89 @@
 from importlib.metadata import PackageNotFoundError, version
 
 from pyprideap.core import AffinityDataset, Level, Platform, ValidationResult
-from pyprideap.filtering import filter_controls, filter_qc
-from pyprideap.lod import LodMethod, LodStats, compute_lod_from_controls, compute_nclod, compute_lod_stats, get_bundled_fixed_lod_path, get_reported_lod, get_valid_proteins, load_fixed_lod
-from pyprideap.pride import PrideClient
-from pyprideap.qc.compute import compute_all as compute_qc
-from pyprideap.qc.report import qc_report
-from pyprideap.readers.registry import read
-from pyprideap.stats import DatasetStats, compute_stats
-from pyprideap.validators import validate
+from pyprideap.stats.design import randomize_plates
+from pyprideap.processing.filtering import filter_controls, filter_qc
+from pyprideap.processing.lod import LodMethod, LodStats, compute_lod_from_controls, compute_nclod, compute_lod_stats, get_bundled_fixed_lod_path, get_reported_lod, get_valid_proteins, load_fixed_lod
+from pyprideap.processing.normalization import assess_bridgeability, bridge_normalize, reference_median_normalize, select_bridge_samples, subset_normalize
+from pyprideap.viz.plots import boxplot
+from pyprideap.api.pride import PrideClient
+from pyprideap.viz.qc.compute import compute_all as compute_qc, compute_volcano
+from pyprideap.viz.qc.report import qc_report
+from pyprideap.io.readers.registry import read
+from pyprideap.stats.descriptive import DatasetStats, compute_stats
+from pyprideap.viz.theme import PRIDE_COLORS, pride_color_discrete, pride_color_gradient, pride_fill_discrete, set_plot_theme
+from pyprideap.io.validators import validate
 
 try:
     __version__ = version("pyprideap")
 except PackageNotFoundError:
     __version__ = "0.0.0+unknown"
 
+# Lazy imports for optional-dependency modules
+def ttest(*args, **kwargs):
+    from pyprideap.stats.differential import ttest as _ttest
+    return _ttest(*args, **kwargs)
+
+def wilcoxon(*args, **kwargs):
+    from pyprideap.stats.differential import wilcoxon as _wilcoxon
+    return _wilcoxon(*args, **kwargs)
+
+def anova(*args, **kwargs):
+    from pyprideap.stats.differential import anova as _anova
+    return _anova(*args, **kwargs)
+
+def anova_posthoc(*args, **kwargs):
+    from pyprideap.stats.differential import anova_posthoc as _anova_posthoc
+    return _anova_posthoc(*args, **kwargs)
+
 __all__ = [
     "__version__",
+    # Core
     "AffinityDataset",
     "DatasetStats",
     "Level",
     "LodStats",
+    "LodMethod",
     "Platform",
     "PrideClient",
     "ValidationResult",
-    "LodMethod",
+    # IO
+    "read",
+    "validate",
+    # LOD
     "compute_lod_from_controls",
     "compute_nclod",
     "compute_lod_stats",
-    "compute_qc",
     "get_bundled_fixed_lod_path",
-    "compute_stats",
     "get_reported_lod",
+    "get_valid_proteins",
     "load_fixed_lod",
+    # QC
+    "compute_qc",
+    "compute_stats",
+    "compute_volcano",
     "qc_report",
+    # Filtering
     "filter_controls",
     "filter_qc",
-    "get_valid_proteins",
-    "read",
-    "validate",
+    # Normalization
+    "assess_bridgeability",
+    "bridge_normalize",
+    "reference_median_normalize",
+    "select_bridge_samples",
+    "subset_normalize",
+    # Plots
+    "boxplot",
+    "PRIDE_COLORS",
+    "pride_color_discrete",
+    "pride_color_gradient",
+    "pride_fill_discrete",
+    "set_plot_theme",
+    # Statistical testing
+    "ttest",
+    "wilcoxon",
+    "anova",
+    "anova_posthoc",
+    # Experimental design
+    "randomize_plates",
 ]
