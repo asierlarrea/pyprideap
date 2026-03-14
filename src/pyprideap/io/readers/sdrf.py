@@ -73,7 +73,7 @@ def read_sdrf(path: str | Path) -> pd.DataFrame:
         else:
             rename[col] = f"{base} {count}"
 
-    df = df.rename(columns=rename)
+    df: pd.DataFrame = df.rename(columns=rename)
     return df
 
 
