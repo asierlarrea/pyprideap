@@ -1,0 +1,7 @@
+source name	characteristics[organism]	characteristics[disease]	characteristics[disease]	characteristics[sex]	factor value[treatment]
+S001	homo sapiens	healthy	not applicable	male	control
+S002	homo sapiens	COVID-19	not applicable	female	treated
+S003	homo sapiens	healthy	not applicable	male	control
+S004	homo sapiens	COVID-19	not applicable	female	treated
+S005	homo sapiens	healthy	hypertension	male	control
+S006	homo sapiens	COVID-19	not applicable	female	treated

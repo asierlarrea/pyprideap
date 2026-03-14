@@ -1397,33 +1397,103 @@ def render_uniprot_duplicates(data: UniProtDuplicateData) -> Figure:
 
 def render_volcano(data: VolcanoData) -> Figure:
     """Volcano plot: fold change (x) vs -log10 adjusted p-value (y)."""
-    go, _ = _import_plotly()
+    import numpy as np
 
-    _DIR_COLORS = {"up": "#e74c3c", "down": "#3498db", "ns": "#95a5a6"}
+    go, _ = _import_plotly()
+    from pyprideap.viz.theme import PRIDE_COLORS, set_plot_theme
+
+    _DIR_COLORS = {
+        "up": PRIDE_COLORS["error"],  # red
+        "down": PRIDE_COLORS["accent"],  # blue
+        "ns": "#d5d8dc",  # light gray
+    }
     _DIR_NAMES = {"up": "Up-regulated", "down": "Down-regulated", "ns": "Not significant"}
 
+    # Count per direction for legend labels
+    dir_counts: dict[str, int] = {"up": 0, "down": 0, "ns": 0}
+    for d in data.direction:
+        dir_counts[d] += 1
+
     fig = go.Figure()
-    for direction in ["up", "down", "ns"]:
+
+    # Draw non-significant first (background), then significant on top
+    for direction in ["ns", "down", "up"]:
         mask = [i for i, d in enumerate(data.direction) if d == direction]
         if not mask:
             continue
+
+        is_sig = direction != "ns"
+        label = f"{_DIR_NAMES[direction]} ({dir_counts[direction]})"
+
         fig.add_trace(
             go.Scatter(
                 x=[data.fold_change[i] for i in mask],
                 y=[data.neg_log10_pval[i] for i in mask],
                 mode="markers",
-                marker=dict(size=6, color=_DIR_COLORS[direction], opacity=0.7),
-                name=_DIR_NAMES[direction],
+                marker=dict(
+                    size=5 if not is_sig else 7,
+                    color=_DIR_COLORS[direction],
+                    opacity=0.35 if not is_sig else 0.85,
+                    line=dict(width=0.5, color="white") if is_sig else dict(width=0),
+                ),
+                name=label,
                 text=[data.assay_names[i] for i in mask],
-                hovertemplate="%{text}<br>FC: %{x:.3f}<br>-log10(p): %{y:.2f}<extra></extra>",
+                customdata=[[data.protein_ids[i], data.fold_change[i], data.neg_log10_pval[i]] for i in mask],
+                hovertemplate=(
+                    "<b>%{text}</b><br>"
+                    "Protein: %{customdata[0]}<br>"
+                    "Fold Change: %{customdata[1]:.3f}<br>"
+                    "-log<sub>10</sub>(adj p): %{customdata[2]:.2f}"
+                    "<extra></extra>"
+                ),
             )
         )
 
+    # Threshold reference lines
+    fc_max = max((abs(fc) for fc in data.fold_change), default=2.0)
+    x_range = max(fc_max * 1.15, 1.5)
+    p_line = -np.log10(0.05)
+
+    fig.add_hline(
+        y=p_line,
+        line_dash="dot",
+        line_color=PRIDE_COLORS["text_muted"],
+        line_width=1,
+        opacity=0.6,
+        annotation_text="p = 0.05",
+        annotation_position="top right",
+        annotation_font_size=10,
+        annotation_font_color=PRIDE_COLORS["text_muted"],
+    )
+    for fc_val in [-1, 1]:
+        fig.add_vline(
+            x=fc_val,
+            line_dash="dot",
+            line_color=PRIDE_COLORS["text_muted"],
+            line_width=1,
+            opacity=0.6,
+        )
+
+    set_plot_theme(fig)
     fig.update_layout(
-        title=data.title,
-        xaxis_title="Fold Change (log2)",
-        yaxis_title="-log10(adjusted p-value)",
-        legend=dict(orientation="h", yanchor="bottom", y=-0.25),
+        title=dict(text=data.title, x=0.5, xanchor="center"),
+        xaxis_title="Fold Change",
+        yaxis_title="-log<sub>10</sub>(adjusted p-value)",
+        xaxis=dict(
+            range=[-x_range, x_range],
+            zeroline=True,
+            zerolinecolor=PRIDE_COLORS["border"],
+            zerolinewidth=1,
+        ),
+        yaxis=dict(rangemode="tozero"),
+        legend=dict(
+            orientation="h",
+            yanchor="top",
+            y=-0.15,
+            xanchor="center",
+            x=0.5,
+        ),
+        margin=dict(l=60, r=30, t=60, b=80),
     )
     return fig
 
