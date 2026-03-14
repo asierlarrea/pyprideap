@@ -413,7 +413,7 @@ def anova(
                 group_arrays.append(arr)
 
             # Need at least 2 observations in each group
-            if any(len(arr) < 1 for arr in group_arrays):
+            if any(len(arr) < 2 for arr in group_arrays):
                 records.append(_empty_anova_row(protein_id, assay_map))
                 continue
 

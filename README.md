@@ -199,10 +199,10 @@ results = pp.ttest(dataset, group_var="Treatment")
 results = pp.wilcoxon(dataset, group_var="Treatment")
 
 # ANOVA with covariates
-results = pp.anova(dataset, variables=["Treatment"], covariates=["Age", "Sex"])
+results = pp.anova(dataset, group_var="Treatment", covariates=["Age", "Sex"])
 
 # Post-hoc pairwise comparisons
-posthoc = pp.anova_posthoc(dataset, variable="Treatment")
+posthoc = pp.anova_posthoc(dataset, group_var="Treatment")
 ```
 
 ## Normalization

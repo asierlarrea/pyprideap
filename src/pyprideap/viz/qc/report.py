@@ -492,6 +492,8 @@ document.addEventListener('DOMContentLoaded', function() {
             emptyEl.style.display = 'none';
         }
         function notifyHeight() {
+            // Wildcard origin is intentional: the report can be embedded on
+            // any host and the payload contains only a non-sensitive height value.
             window.parent.postMessage(
                 {type: 'pride-qc-resize', height: document.body.scrollHeight}, '*'
             );

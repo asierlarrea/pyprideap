@@ -45,12 +45,12 @@ def filter_controls(dataset: AffinityDataset) -> AffinityDataset:
     expression = dataset.expression[keep_mask].reset_index(drop=True)
 
     metadata = dict(dataset.metadata)
-    if "lod_matrix" in metadata:
-        import pandas as pd
+    import pandas as pd
 
-        lod_df = metadata["lod_matrix"]
-        if isinstance(lod_df, pd.DataFrame):
-            metadata["lod_matrix"] = lod_df[keep_mask].reset_index(drop=True)
+    for key in ("lod_matrix", "count_matrix", "ext_count"):
+        df = metadata.get(key)
+        if isinstance(df, pd.DataFrame):
+            metadata[key] = df[keep_mask].reset_index(drop=True)
 
     return AffinityDataset(
         platform=dataset.platform,
@@ -82,12 +82,12 @@ def filter_qc(
     expression = dataset.expression[keep_mask].reset_index(drop=True)
 
     metadata = dict(dataset.metadata)
-    if "lod_matrix" in metadata:
-        import pandas as pd
+    import pandas as pd
 
-        lod_df = metadata["lod_matrix"]
-        if isinstance(lod_df, pd.DataFrame):
-            metadata["lod_matrix"] = lod_df[keep_mask].reset_index(drop=True)
+    for key in ("lod_matrix", "count_matrix", "ext_count"):
+        df = metadata.get(key)
+        if isinstance(df, pd.DataFrame):
+            metadata[key] = df[keep_mask].reset_index(drop=True)
 
     return AffinityDataset(
         platform=dataset.platform,
