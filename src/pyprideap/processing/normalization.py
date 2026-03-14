@@ -27,6 +27,38 @@ import pandas as pd
 
 from pyprideap.core import AffinityDataset
 
+
+def _resolve_common_samples(
+    dataset1: AffinityDataset,
+    dataset2: AffinityDataset,
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.Index]:
+    """Return aligned expression frames and common sample index.
+
+    Matches samples by SampleID / SampleId / SampleName when available,
+    falling back to positional integer index otherwise.
+    """
+    _id_col = None
+    for col in ("SampleID", "SampleId", "SampleName"):
+        if col in dataset1.samples.columns and col in dataset2.samples.columns:
+            _id_col = col
+            break
+
+    if _id_col is not None:
+        common_ids = set(dataset1.samples[_id_col]) & set(dataset2.samples[_id_col])
+        idx1 = dataset1.samples.index[dataset1.samples[_id_col].isin(common_ids)]
+        idx2 = dataset2.samples.index[dataset2.samples[_id_col].isin(common_ids)]
+        aligned1 = dataset1.expression.loc[idx1].copy()
+        aligned1.index = dataset1.samples.loc[idx1, _id_col].values
+        aligned2 = dataset2.expression.loc[idx2].copy()
+        aligned2.index = dataset2.samples.loc[idx2, _id_col].values
+        common_samples = aligned1.index.intersection(aligned2.index)
+    else:
+        aligned1 = dataset1.expression
+        aligned2 = dataset2.expression
+        common_samples = aligned1.index.intersection(aligned2.index)
+    return aligned1, aligned2, common_samples
+
+
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
@@ -113,10 +145,9 @@ def subset_normalize(
 ) -> AffinityDataset:
     """Adjust *dataset2* using a reference subset of proteins.
 
-    For every protein the per-protein adjustment is the difference between the
-    overall median of the reference proteins in *dataset1* and the overall
-    median of the reference proteins in *dataset2* (computed across all
-    samples).
+    For each reference protein the adjustment is the difference between its
+    median in *dataset1* and its median in *dataset2*.  Only reference
+    proteins are shifted; non-reference proteins are left unchanged.
 
     Parameters
     ----------
@@ -143,7 +174,8 @@ def subset_normalize(
     if not valid_ref:
         raise ValueError(f"None of the reference proteins were found in both datasets. Requested: {reference_proteins}")
 
-    # Per-protein adjustment: median across all samples in ds1 vs ds2
+    # Per-protein adjustment applied only to the reference proteins;
+    # non-reference proteins in dataset2 are left unchanged.
     median_ds1 = dataset1.expression[valid_ref].median(axis=0)
     median_ds2 = dataset2.expression[valid_ref].median(axis=0)
     adjustment = median_ds1 - median_ds2
@@ -363,7 +395,7 @@ def assess_bridgeability(
     if overlapping_proteins.empty:
         raise ValueError("No overlapping proteins between the two datasets.")
 
-    common_samples = dataset1.expression.index.intersection(dataset2.expression.index)
+    aligned1, aligned2, common_samples = _resolve_common_samples(dataset1, dataset2)
 
     records: list[dict] = []
     for protein in overlapping_proteins:
@@ -376,7 +408,12 @@ def assess_bridgeability(
 
         # Correlation requires matched samples
         if len(common_samples) >= 3:
-            paired = pd.DataFrame({"a": vals1.reindex(common_samples), "b": vals2.reindex(common_samples)}).dropna()
+            paired = pd.DataFrame(
+                {
+                    "a": aligned1[protein].reindex(common_samples),
+                    "b": aligned2[protein].reindex(common_samples),
+                }
+            ).dropna()
             correlation = float(paired["a"].corr(paired["b"])) if len(paired) >= 3 else np.nan
         else:
             correlation = np.nan
@@ -449,10 +486,12 @@ def assess_cross_product_bridgeability(
     if overlapping.empty:
         raise ValueError("No overlapping proteins between the two datasets.")
 
-    common_samples = dataset1.expression.index.intersection(dataset2.expression.index)
+    aligned1, aligned2, common_samples = _resolve_common_samples(dataset1, dataset2)
 
     numeric1 = dataset1.expression[overlapping].apply(pd.to_numeric, errors="coerce")
     numeric2 = dataset2.expression[overlapping].apply(pd.to_numeric, errors="coerce")
+    aligned_numeric1 = aligned1[overlapping].apply(pd.to_numeric, errors="coerce")
+    aligned_numeric2 = aligned2[overlapping].apply(pd.to_numeric, errors="coerce")
 
     records: list[dict] = []
     for protein in overlapping:
@@ -514,7 +553,10 @@ def assess_cross_product_bridgeability(
         r2 = np.nan
         if len(common_samples) >= 3:
             paired = pd.DataFrame(
-                {"a": numeric1[protein].reindex(common_samples), "b": numeric2[protein].reindex(common_samples)}
+                {
+                    "a": aligned_numeric1[protein].reindex(common_samples),
+                    "b": aligned_numeric2[protein].reindex(common_samples),
+                }
             ).dropna()
             if len(paired) >= 3:
                 corr = float(paired["a"].corr(paired["b"]))

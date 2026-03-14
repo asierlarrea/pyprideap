@@ -24,7 +24,7 @@ def read_somascan_csv(path: str | Path) -> AffinityDataset:
     samples = df[meta_cols].reset_index(drop=True)
     expression = df[seq_cols].astype(float).reset_index(drop=True)
 
-    seq_ids = [c.replace("SeqId.", "") for c in seq_cols]
+    seq_ids = list(seq_cols)
     features = pd.DataFrame(
         {
             "SeqId": seq_ids,

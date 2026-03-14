@@ -520,7 +520,7 @@ def get_reported_lod(dataset: AffinityDataset) -> pd.DataFrame | pd.Series | Non
     return pd.Series(lod_series.values, index=dataset.expression.columns[: len(lod_series)])
 
 
-_CONFIGS_DIR = Path(__file__).resolve().parent.parent.parent.parent / "configs"
+_CONFIGS_DIR = Path(__file__).resolve().parent.parent / "configs"
 
 # Mapping from Platform to bundled FixedLOD CSV filename.
 _BUNDLED_FIXED_LOD: dict[str, str] = {
