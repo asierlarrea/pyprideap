@@ -326,7 +326,9 @@ def compute_pc_normalized_lod(
         if "PlateID" in dataset.samples.columns:
             st = dataset.samples.get("SampleType")
             is_sample = (
-                st.astype(str).str.upper() == "SAMPLE" if st is not None else pd.Series(True, index=dataset.samples.index)
+                st.astype(str).str.upper() == "SAMPLE"
+                if st is not None
+                else pd.Series(True, index=dataset.samples.index)
             )
             plates = dataset.samples["PlateID"]
             for plate_id in plates.unique():

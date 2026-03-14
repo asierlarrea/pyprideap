@@ -60,20 +60,20 @@ _QC_LOD_COLORS = {
 }
 
 
-_LARGE_DATASET_THRESHOLD = 200  # samples above this use aggregated views
+_DISTRIBUTION_SUMMARY_THRESHOLD = 10  # samples above this use percentile band summary
 
 
 def render_distribution(data: DistributionData) -> Figure:
     """Per-sample overlaid density curves (KDE-like via histograms with histnorm).
 
-    For large datasets (>200 samples), renders percentile band summary instead
-    of individual traces to keep file size manageable.
+    For datasets with >10 samples, renders percentile band summary instead
+    of individual traces for clearer visualization.
     """
     go, _ = _import_plotly()
 
     n_samples = len(data.sample_ids)
 
-    if n_samples > _LARGE_DATASET_THRESHOLD:
+    if n_samples > _DISTRIBUTION_SUMMARY_THRESHOLD:
         return _render_distribution_summary(data)
 
     fig = go.Figure()
@@ -204,7 +204,8 @@ def _render_distribution_summary(data: DistributionData) -> Figure:
         title=f"{data.title} (summary of {n_samples} samples)",
         xaxis_title=data.xlabel,
         yaxis_title=data.ylabel,
-        legend=dict(orientation="h", yanchor="bottom", y=-0.2),
+        legend=dict(orientation="h", yanchor="top", y=-0.15, xanchor="center", x=0.5),
+        margin=dict(b=120),
     )
     return fig
 
@@ -302,9 +303,6 @@ def render_pca(data: PcaData) -> Figure:
     _, px = _import_plotly()
     import pandas as pd
 
-    n_points = len(data.labels)
-    show_text = n_points <= _LARGE_DATASET_THRESHOLD
-
     df = pd.DataFrame({"PC1": data.pc1, "PC2": data.pc2, "Label": data.labels, "Group": data.groups})
     ve = data.variance_explained
     fig = px.scatter(
@@ -312,7 +310,6 @@ def render_pca(data: PcaData) -> Figure:
         x="PC1",
         y="PC2",
         color="Group",
-        text="Label" if show_text else None,
         hover_data=["Label"],
         title=data.title,
         labels={
@@ -329,9 +326,6 @@ def render_tsne(data: UmapData) -> Figure:
     _, px = _import_plotly()
     import pandas as pd
 
-    n_points = len(data.labels)
-    show_text = n_points <= _LARGE_DATASET_THRESHOLD
-
     method = data.title  # "t-SNE" or legacy "UMAP"
     x_label = f"{method} 1"
     y_label = f"{method} 2"
@@ -341,7 +335,6 @@ def render_tsne(data: UmapData) -> Figure:
         x=x_label,
         y=y_label,
         color="Group",
-        text="Label" if show_text else None,
         hover_data=["Label"],
         title=f"{method} Projection",
     )
@@ -363,8 +356,8 @@ def render_dimreduction(pca_data: PcaData | None, umap_data: UmapData | None) ->
     If only one method produced data, renders that alone without a dropdown.
     Returns None if neither is available.
 
-    For large datasets (>200 samples), text labels are hidden by default
-    to improve rendering performance. Labels can be toggled via report UI.
+    Text labels are hidden by default for all datasets. Labels can be
+    toggled via the "Show Labels" button in the report UI.
     """
     if pca_data is None and umap_data is None:
         return None
@@ -376,12 +369,8 @@ def render_dimreduction(pca_data: PcaData | None, umap_data: UmapData | None) ->
     nl_x_label = f"{nl_method}1" if nl_method == "UMAP" else f"{nl_method} 1"
     nl_y_label = f"{nl_method}2" if nl_method == "UMAP" else f"{nl_method} 2"
 
-    # For large datasets, hide text labels by default
-    n_points = max(
-        len(pca_data.labels) if pca_data is not None else 0,
-        len(umap_data.labels) if umap_data is not None else 0,
-    )
-    scatter_mode = "markers" if n_points > _LARGE_DATASET_THRESHOLD else "markers+text"
+    # Always hide text labels by default; users can toggle via report UI
+    scatter_mode = "markers"
 
     fig = go.Figure()
     pca_trace_range: tuple[int, int] = (0, 0)

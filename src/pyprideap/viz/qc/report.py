@@ -1188,16 +1188,11 @@ def qc_report(dataset: AffinityDataset, output: str | Path) -> Path:
         else:
             toggle_html = ""
 
-        # Add label toggle button for large datasets
-        n_dimred_points = max(
-            len(pca_data.labels) if pca_data is not None else 0,
-            len(umap_data.labels) if umap_data is not None else 0,
+        # Add label toggle button (labels are hidden by default for all datasets)
+        toggle_html += (
+            '<button class="label-toggle-btn" onclick="toggleDimRedLabels(this)">'
+            "Show Labels</button>"
         )
-        if n_dimred_points > 200:
-            toggle_html += (
-                '<button class="label-toggle-btn" onclick="toggleDimRedLabels(this)">'
-                "Show Labels</button>"
-            )
 
         rendered["dimreduction"] = ("Dimensionality Reduction", combined_html, toggle_html)
 

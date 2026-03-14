@@ -229,7 +229,10 @@ def select_bridge_samples(
             sid_col = col
             break
 
-    sample_ids = dataset.samples[sid_col].astype(str) if sid_col in dataset.samples.columns else pd.Series([f"S{i}" for i in range(len(dataset.samples))])
+    if sid_col in dataset.samples.columns:
+        sample_ids = dataset.samples[sid_col].astype(str)
+    else:
+        sample_ids = pd.Series([f"S{i}" for i in range(len(dataset.samples))])
 
     # 1. Exclude control samples
     keep = pd.Series(True, index=dataset.samples.index)
@@ -626,8 +629,6 @@ def quantile_smooth_normalize(
         ref_quantiles = np.quantile(ref_bridge_vals, ecdf_probs)
 
         # Step 3: Fit spline — knots at 7 quantile positions of target bridge
-        tgt_knots = np.quantile(tgt_bridge_vals, list(_QS_KNOT_PROBS))
-
         # Use unique sorted target values as x, mapped reference quantiles as y
         unique_tgt = np.unique(sorted_tgt)
         # Map: for each unique target value, find the corresponding ref quantile
@@ -1332,7 +1333,6 @@ def _add_non_overlapping_assays(
     result with their original NPX values (no adjustment).
     """
     norm_cols = set(normalized_target.expression.columns)
-    ref_cols = set(reference.expression.columns)
     orig_tgt_cols = set(original_target.expression.columns)
 
     # Find non-overlapping assays

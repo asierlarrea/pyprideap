@@ -14,8 +14,8 @@ from pyprideap.processing.lod import (
     compute_lod_stats,
     compute_nclod,
     get_bundled_fixed_lod_path,
-    get_reported_lod,
     get_proteins_above_lod,
+    get_reported_lod,
     get_valid_proteins,
     load_fixed_lod,
 )

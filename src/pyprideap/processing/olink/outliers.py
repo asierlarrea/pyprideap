@@ -152,7 +152,12 @@ def compute_iqr_median_outliers(
         panel_data = numeric[panel_cols]
 
         # Per-sample IQR and median
-        sample_iqrs = panel_data.apply(lambda row: float(row.dropna().quantile(0.75) - row.dropna().quantile(0.25)) if row.notna().sum() > 1 else np.nan, axis=1)
+        sample_iqrs = panel_data.apply(
+            lambda row: float(row.dropna().quantile(0.75) - row.dropna().quantile(0.25))
+            if row.notna().sum() > 1
+            else np.nan,
+            axis=1,
+        )
         sample_medians = panel_data.median(axis=1)
 
         # Compute panel-level stats
