@@ -782,11 +782,24 @@ def render_norm_scale(data: NormScaleData) -> Figure:
             y=val, line_dash=dash, line_color=color, line_width=1.5, annotation_text=label, annotation_position="right"
         )
 
+    n_legend_items = df["Plate"].nunique()
+    if n_legend_items > 15:
+        # Too many plates for horizontal legend — use scrollable vertical legend on the right
+        legend_cfg = dict(
+            orientation="v", yanchor="top", y=1, xanchor="left", x=1.02,
+            font=dict(size=9),
+        )
+        margin_cfg = dict(r=140)
+    else:
+        legend_cfg = dict(orientation="h", yanchor="top", y=-0.15, xanchor="center", x=0.5)
+        margin_cfg = dict(b=100)
+
     fig.update_layout(
         title=data.title,
         xaxis_title="Sample Rank (sorted by NormScale)",
         yaxis_title="HybControlNormScale",
-        legend=dict(orientation="h", yanchor="bottom", y=-0.2),
+        legend=legend_cfg,
+        margin=margin_cfg,
     )
     return fig
 
