@@ -236,7 +236,9 @@ def select_bridge_samples(
     if sid_col in dataset.samples.columns:
         keep &= ~sample_ids.str.contains("CONTROL_SAMPLE", case=False, na=False)
     if "SampleType" in dataset.samples.columns:
-        keep &= dataset.samples["SampleType"].astype(str).str.upper().isin({"SAMPLE", ""})
+        from pyprideap.processing.filtering import _CONTROL_SAMPLE_TYPES
+
+        keep &= ~dataset.samples["SampleType"].astype(str).str.lower().str.strip().isin(_CONTROL_SAMPLE_TYPES)
 
     # 2. Exclude QC outliers
     if exclude_qc_outliers:

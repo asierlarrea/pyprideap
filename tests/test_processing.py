@@ -16,6 +16,7 @@ from pyprideap.processing.lod import (
     get_valid_proteins,
     load_fixed_lod,
 )
+from pyprideap.processing.lod import get_proteins_above_lod
 from pyprideap.processing.normalization import (
     assess_bridgeability,
     bridge_normalize,
@@ -339,3 +340,91 @@ class TestNormalizationSomascan:
         assert result.metadata["SignalSpace"] == "7k"
         # Does not mutate original
         assert ds.expression["SL0"].iloc[0] == pytest.approx(1000.0)
+
+
+# ---------------------------------------------------------------------------
+# Regression tests for audit fixes
+# ---------------------------------------------------------------------------
+
+
+class TestAuditFixes:
+    def test_col_check_filter_uses_seqid_not_position(self):
+        """filter_by_col_check must map by SeqId, not by positional index."""
+        from pyprideap.processing.somascan.qc_flags import filter_by_col_check
+
+        features = pd.DataFrame({
+            "SeqId": ["10000-1", "10001-2", "10002-3"],
+            "ColCheck": ["PASS", "FLAG", "PASS"],
+        })
+        expression = pd.DataFrame({
+            "10000-1": [100.0, 200.0],
+            "10001-2": [300.0, 400.0],
+            "10002-3": [500.0, 600.0],
+        })
+        samples = pd.DataFrame({"SampleId": ["S1", "S2"], "SampleType": ["Sample", "Sample"]})
+        ds = AffinityDataset(
+            platform=Platform.SOMASCAN, samples=samples,
+            features=features, expression=expression,
+        )
+        result = filter_by_col_check(ds)
+        assert list(result.expression.columns) == ["10000-1", "10002-3"]
+        assert len(result.features) == 2
+
+    def test_get_valid_proteins_with_filtered_lod(self):
+        """get_valid_proteins must align LOD rows after filtering controls."""
+        ds = _make_olink_dataset(
+            lod_values=[2.0, 2.0, 2.0],
+            expression_values=([[5.0, 5.0, 5.0]] * 5 + [[0.1, 0.1, 0.1]] * _N_CONTROLS),
+        )
+        valid = get_valid_proteins(ds)
+        # All 3 proteins should be valid (bio samples are above LOD)
+        assert len(valid) == 3
+
+    def test_assay_map_uses_column_names(self):
+        """_resolve_assay_map must key by OlinkID, not integer index."""
+        from pyprideap.stats.differential import _resolve_assay_map
+
+        ds = _make_olink_dataset()
+        ds.features["Assay"] = ["AssayA", "AssayB", "AssayC"]
+        assay_map = _resolve_assay_map(ds)
+        assert assay_map.get("OID0") == "AssayA"
+        assert assay_map.get("OID1") == "AssayB"
+
+    def test_select_bridge_samples_non_standard_sample_type(self):
+        """select_bridge_samples must accept non-'SAMPLE' biological types."""
+        ds = _make_norm_dataset(
+            ["S1", "S2", "S3", "S4", "S5"],
+            {"O1": [1.0, 2.0, 3.0, 4.0, 5.0], "O2": [5.0, 4.0, 3.0, 2.0, 1.0]},
+        )
+        ds.samples["SampleType"] = "Subject"
+        result = select_bridge_samples(ds, n=3)
+        assert len(result) == 3
+
+    def test_proteins_above_lod_returns_accessions(self):
+        """get_proteins_above_lod returns UniProt strings, not assay IDs."""
+        # Use a dataset with only biological samples (no controls)
+        n = 5
+        ds = AffinityDataset(
+            platform=Platform.OLINK_EXPLORE,
+            samples=pd.DataFrame({
+                "SampleID": [f"S{i}" for i in range(n)],
+                "SampleType": ["Sample"] * n,
+                "SampleQC": ["PASS"] * n,
+            }),
+            features=pd.DataFrame({
+                "OlinkID": ["OID0", "OID1", "OID2"],
+                "UniProt": ["P0", "P1", "P2"],
+                "Panel": ["A"] * 3,
+                "LOD": [2.0, 2.0, 2.0],
+            }),
+            expression=pd.DataFrame({
+                "OID0": [5.0] * n,
+                "OID1": [5.0] * n,
+                "OID2": [0.1] * n,
+            }),
+        )
+        result = get_proteins_above_lod(ds, threshold=50.0)
+        assert "P0" in result
+        assert "P1" in result
+        # P2 is below LOD for all samples
+        assert "P2" not in result

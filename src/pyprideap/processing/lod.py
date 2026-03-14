@@ -290,7 +290,6 @@ def compute_pc_normalized_lod(
         lod_detail = compute_nc_lod_detailed(dataset)
 
     n_samples = len(dataset.samples)
-    n_cols = len(dataset.expression.columns)
 
     # Start with LODNPX broadcast to all samples
     lod_matrix = pd.DataFrame(
@@ -874,9 +873,9 @@ def get_valid_proteins(
     if ds.expression.empty:
         return []
 
-    # Resolve LOD
+    # Resolve LOD — use filtered ds for row-aligned LOD
     if lod is None:
-        lod = get_lod_values(dataset)
+        lod = get_lod_values(ds)
     if lod is None:
         try:
             lod = compute_lod_from_controls(dataset)
@@ -885,6 +884,9 @@ def get_valid_proteins(
             return sorted(expr_numeric.columns[expr_numeric.notna().any()].tolist())
 
     expr_numeric = ds.expression.apply(pd.to_numeric, errors="coerce")
+    # Align LOD rows to filtered expression when LOD is a DataFrame
+    if isinstance(lod, pd.DataFrame):
+        lod = lod.reindex(expr_numeric.index)
     above_lod, _ = _above_lod_matrix(expr_numeric, lod)
     valid_cols = above_lod.any(axis=0)
 

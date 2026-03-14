@@ -674,7 +674,7 @@ def compute_data_completeness(dataset: AffinityDataset) -> DataCompletenessData 
                 above_lod_rate.append(round(n_above / n_valid, 4))
                 below_lod_rate.append(round((n_valid - n_above) / n_valid, 4))
             else:
-                above_lod_rate.append(1.0)
+                above_lod_rate.append(0.0)
                 below_lod_rate.append(0.0)
 
         # Per-protein missing frequency from LOD matrix

@@ -159,13 +159,10 @@ def filter_by_col_check(
 
     features = dataset.features[keep_mask].reset_index(drop=True)
 
-    # Map feature indices to expression columns
-    keep_indices = keep_mask[keep_mask].index.tolist()
-    if len(keep_indices) <= len(dataset.expression.columns):
-        keep_cols = [dataset.expression.columns[i] for i in keep_indices
-                     if i < len(dataset.expression.columns)]
-    else:
-        keep_cols = list(dataset.expression.columns)
+    # Map features to expression columns by SeqId (or first ID column)
+    id_col = "SeqId" if "SeqId" in dataset.features.columns else dataset.features.columns[0]
+    keep_ids = set(dataset.features.loc[keep_mask, id_col].astype(str))
+    keep_cols = [c for c in dataset.expression.columns if str(c) in keep_ids]
 
     expression = dataset.expression[keep_cols].reset_index(drop=True)
 

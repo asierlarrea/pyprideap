@@ -49,7 +49,7 @@ def _download_pad_files(accession: str, dest_dir: Path) -> list[Path]:
 
     downloaded: list[Path] = []
     for name, url in data_urls.items():
-        dest = dest_dir / name
+        dest = dest_dir / Path(name).name  # sanitize: strip directory components
         # Convert FTP URLs to HTTPS for broader compatibility
         if url.startswith("ftp://ftp.pride.ebi.ac.uk/"):
             url = url.replace("ftp://ftp.pride.ebi.ac.uk/", "https://ftp.pride.ebi.ac.uk/", 1)

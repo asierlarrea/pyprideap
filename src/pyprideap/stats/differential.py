@@ -11,15 +11,10 @@ adjusted *p*-values.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
 import numpy as np
 import pandas as pd
 
 from pyprideap.core import AffinityDataset
-
-if TYPE_CHECKING:
-    pass
 
 # ---------------------------------------------------------------------------
 # Lazy imports with user-friendly error messages
@@ -64,11 +59,14 @@ def _resolve_assay_map(dataset: AffinityDataset) -> dict[str, str]:
     """Return a mapping from protein/column id to Assay name.
 
     If the features DataFrame contains an ``Assay`` column the mapping is
-    ``{index_or_id: Assay}``.  Otherwise an empty dict is returned.
+    ``{OlinkID_or_SeqId: Assay}``.  Otherwise an empty dict is returned.
     """
     if "Assay" not in dataset.features.columns:
         return {}
-    return dict(zip(dataset.features.index, dataset.features["Assay"]))
+    id_col = "OlinkID" if "OlinkID" in dataset.features.columns else "SeqId"
+    if id_col not in dataset.features.columns:
+        id_col = dataset.features.columns[0]
+    return dict(zip(dataset.features[id_col], dataset.features["Assay"]))
 
 
 def _validate_group_var(

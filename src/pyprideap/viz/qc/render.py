@@ -60,9 +60,23 @@ _QC_LOD_COLORS = {
 }
 
 
+_LARGE_DATASET_THRESHOLD = 200  # samples above this use aggregated views
+
+
 def render_distribution(data: DistributionData) -> Figure:
-    """Per-sample overlaid density curves (KDE-like via histograms with histnorm)."""
+    """Per-sample overlaid density curves (KDE-like via histograms with histnorm).
+
+    For large datasets (>200 samples), renders percentile band summary instead
+    of individual traces to keep file size manageable.
+    """
     go, _ = _import_plotly()
+    import numpy as np
+
+    n_samples = len(data.sample_ids)
+
+    if n_samples > _LARGE_DATASET_THRESHOLD:
+        return _render_distribution_summary(data)
+
     fig = go.Figure()
 
     for sid, vals in zip(data.sample_ids, data.sample_values):
@@ -84,6 +98,114 @@ def render_distribution(data: DistributionData) -> Figure:
         yaxis_title=data.ylabel,
         barmode="overlay",
         legend_title="Sample",
+    )
+    return fig
+
+
+def _render_distribution_summary(data: DistributionData) -> Figure:
+    """Percentile band summary for large datasets.
+
+    Shows median, IQR (25th-75th), and 5th-95th percentile bands computed
+    across all samples at shared bin edges, plus a random subsample of
+    individual traces for context.
+    """
+    go, _ = _import_plotly()
+    import numpy as np
+
+    # Collect all values to determine shared bin edges
+    all_vals = []
+    for vals in data.sample_values:
+        if vals:
+            all_vals.extend(vals)
+    if not all_vals:
+        fig = go.Figure()
+        fig.update_layout(title=data.title)
+        return fig
+
+    all_vals_arr = np.array(all_vals)
+    bin_edges = np.linspace(np.nanpercentile(all_vals_arr, 0.5), np.nanpercentile(all_vals_arr, 99.5), 81)
+    bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2
+
+    # Compute histogram for each sample
+    histograms = []
+    for vals in data.sample_values:
+        if not vals:
+            continue
+        counts, _ = np.histogram(vals, bins=bin_edges)
+        histograms.append(counts)
+
+    if not histograms:
+        fig = go.Figure()
+        fig.update_layout(title=data.title)
+        return fig
+
+    hist_matrix = np.array(histograms)
+
+    # Compute percentiles across samples
+    p5 = np.percentile(hist_matrix, 5, axis=0)
+    p25 = np.percentile(hist_matrix, 25, axis=0)
+    p50 = np.percentile(hist_matrix, 50, axis=0)
+    p75 = np.percentile(hist_matrix, 75, axis=0)
+    p95 = np.percentile(hist_matrix, 95, axis=0)
+
+    fig = go.Figure()
+
+    # 5th-95th band (light fill)
+    fig.add_trace(go.Scatter(
+        x=np.concatenate([bin_centers, bin_centers[::-1]]).tolist(),
+        y=np.concatenate([p95, p5[::-1]]).tolist(),
+        fill="toself",
+        fillcolor="rgba(91,192,190,0.15)",
+        line=dict(color="rgba(0,0,0,0)"),
+        name="5th–95th percentile",
+        hoverinfo="skip",
+    ))
+
+    # 25th-75th band (IQR)
+    fig.add_trace(go.Scatter(
+        x=np.concatenate([bin_centers, bin_centers[::-1]]).tolist(),
+        y=np.concatenate([p75, p25[::-1]]).tolist(),
+        fill="toself",
+        fillcolor="rgba(91,192,190,0.3)",
+        line=dict(color="rgba(0,0,0,0)"),
+        name="IQR (25th–75th)",
+        hoverinfo="skip",
+    ))
+
+    # Median line
+    fig.add_trace(go.Scatter(
+        x=bin_centers.tolist(),
+        y=p50.tolist(),
+        mode="lines",
+        line=dict(color="#4a9e9c", width=2.5),
+        name="Median",
+    ))
+
+    # Add a small random subsample of individual traces for context
+    rng = np.random.default_rng(42)
+    n_subsample = min(10, len(data.sample_ids))
+    indices = rng.choice(len(data.sample_ids), size=n_subsample, replace=False)
+    for idx in sorted(indices):
+        vals = data.sample_values[idx]
+        if not vals:
+            continue
+        counts, _ = np.histogram(vals, bins=bin_edges)
+        fig.add_trace(go.Scatter(
+            x=bin_centers.tolist(),
+            y=counts.tolist(),
+            mode="lines",
+            line=dict(width=0.8),
+            opacity=0.4,
+            name=data.sample_ids[idx],
+            hovertemplate=f"{data.sample_ids[idx]}<br>{data.xlabel}: %{{x:.2f}}<br>Count: %{{y}}<extra></extra>",
+        ))
+
+    n_samples = len(data.sample_ids)
+    fig.update_layout(
+        title=f"{data.title} (summary of {n_samples} samples)",
+        xaxis_title=data.xlabel,
+        yaxis_title=data.ylabel,
+        legend=dict(orientation="h", yanchor="bottom", y=-0.2),
     )
     return fig
 
@@ -181,6 +303,9 @@ def render_pca(data: PcaData) -> Figure:
     _, px = _import_plotly()
     import pandas as pd
 
+    n_points = len(data.labels)
+    show_text = n_points <= _LARGE_DATASET_THRESHOLD
+
     df = pd.DataFrame({"PC1": data.pc1, "PC2": data.pc2, "Label": data.labels, "Group": data.groups})
     ve = data.variance_explained
     fig = px.scatter(
@@ -188,7 +313,7 @@ def render_pca(data: PcaData) -> Figure:
         x="PC1",
         y="PC2",
         color="Group",
-        text="Label",
+        text="Label" if show_text else None,
         hover_data=["Label"],
         title=data.title,
         labels={
@@ -205,6 +330,9 @@ def render_tsne(data: UmapData) -> Figure:
     _, px = _import_plotly()
     import pandas as pd
 
+    n_points = len(data.labels)
+    show_text = n_points <= _LARGE_DATASET_THRESHOLD
+
     method = data.title  # "t-SNE" or legacy "UMAP"
     x_label = f"{method} 1"
     y_label = f"{method} 2"
@@ -214,7 +342,7 @@ def render_tsne(data: UmapData) -> Figure:
         x=x_label,
         y=y_label,
         color="Group",
-        text="Label",
+        text="Label" if show_text else None,
         hover_data=["Label"],
         title=f"{method} Projection",
     )
@@ -235,6 +363,9 @@ def render_dimreduction(pca_data: PcaData | None, umap_data: UmapData | None) ->
 
     If only one method produced data, renders that alone without a dropdown.
     Returns None if neither is available.
+
+    For large datasets (>200 samples), text labels are hidden by default
+    to improve rendering performance. Labels can be toggled via report UI.
     """
     if pca_data is None and umap_data is None:
         return None
@@ -245,6 +376,13 @@ def render_dimreduction(pca_data: PcaData | None, umap_data: UmapData | None) ->
     nl_method = umap_data.title if umap_data is not None else "UMAP"
     nl_x_label = f"{nl_method}1" if nl_method == "UMAP" else f"{nl_method} 1"
     nl_y_label = f"{nl_method}2" if nl_method == "UMAP" else f"{nl_method} 2"
+
+    # For large datasets, hide text labels by default
+    n_points = max(
+        len(pca_data.labels) if pca_data is not None else 0,
+        len(umap_data.labels) if umap_data is not None else 0,
+    )
+    scatter_mode = "markers" if n_points > _LARGE_DATASET_THRESHOLD else "markers+text"
 
     fig = go.Figure()
     pca_trace_range: tuple[int, int] = (0, 0)
@@ -265,7 +403,7 @@ def render_dimreduction(pca_data: PcaData | None, umap_data: UmapData | None) ->
                 go.Scatter(
                     x=[pca_data.pc1[i] for i in mask],
                     y=[pca_data.pc2[i] for i in mask],
-                    mode="markers+text",
+                    mode=scatter_mode,
                     marker=dict(size=10, color=color_map[group]),
                     text=[pca_data.labels[i] for i in mask],
                     textposition="top center",
@@ -292,7 +430,7 @@ def render_dimreduction(pca_data: PcaData | None, umap_data: UmapData | None) ->
                 go.Scatter(
                     x=[umap_data.x[i] for i in mask],
                     y=[umap_data.y[i] for i in mask],
-                    mode="markers+text",
+                    mode=scatter_mode,
                     marker=dict(size=10, color=color_map[group]),
                     text=[umap_data.labels[i] for i in mask],
                     textposition="top center",
@@ -376,7 +514,11 @@ def render_dimreduction(pca_data: PcaData | None, umap_data: UmapData | None) ->
 
 
 def render_heatmap(data: HeatmapData) -> Figure:
-    """Clustered expression heatmap (z-scored) with reordered rows/columns."""
+    """Clustered expression heatmap (z-scored) with reordered rows/columns.
+
+    For large datasets, reduces precision of z-values to 2 decimal places
+    to keep file size manageable.
+    """
     go, _ = _import_plotly()
     import numpy as np
 
@@ -384,6 +526,10 @@ def render_heatmap(data: HeatmapData) -> Figure:
     z_ordered = z[data.sample_order][:, data.protein_order]
     sample_labels = [data.sample_labels[i] for i in data.sample_order]
     protein_labels = [data.protein_labels[i] for i in data.protein_order]
+
+    # Reduce precision for large matrices
+    if z_ordered.size > 50000:
+        z_ordered = np.around(z_ordered, decimals=2)
 
     fig = go.Figure(
         data=go.Heatmap(
@@ -794,17 +940,37 @@ def render_lod_comparison(data: LodComparisonData) -> Figure:
 
 
 def render_outlier_map(data: OutlierMapData) -> Figure:
-    """Heatmap of MAD-based outlier flags (samples × analytes)."""
+    """Heatmap of MAD-based outlier flags (samples × analytes).
+
+    For large datasets, only analytes with at least one outlier are shown
+    to reduce file size significantly.
+    """
     go, _ = _import_plotly()
     import numpy as np
 
     z = np.array(data.matrix, dtype=float)
+    analyte_ids = list(data.analyte_ids)
+    sample_ids = list(data.sample_ids)
+
+    # Filter to only analytes with at least one outlier for large datasets
+    n_analytes = z.shape[1] if z.ndim == 2 else 0
+    if n_analytes > 500:
+        col_has_outlier = z.sum(axis=0) > 0
+        if col_has_outlier.any():
+            z = z[:, col_has_outlier]
+            analyte_ids = [a for a, keep in zip(analyte_ids, col_has_outlier) if keep]
+            n_filtered = n_analytes - len(analyte_ids)
+            title_suffix = f" ({len(analyte_ids)} analytes with outliers shown, {n_filtered} clean analytes hidden)"
+        else:
+            title_suffix = " (no outliers detected)"
+    else:
+        title_suffix = ""
 
     fig = go.Figure(
         data=go.Heatmap(
             z=z,
-            x=data.analyte_ids,
-            y=data.sample_ids,
+            x=analyte_ids,
+            y=sample_ids,
             colorscale=[[0, "#f0f0f0"], [1, "#e74c3c"]],
             zmin=0,
             zmax=1,
@@ -818,10 +984,10 @@ def render_outlier_map(data: OutlierMapData) -> Figure:
     )
 
     fig.update_layout(
-        title=data.title,
+        title=data.title + title_suffix,
         xaxis_title="Analytes",
         yaxis_title="Samples",
-        xaxis=dict(showticklabels=len(data.analyte_ids) <= 50),
+        xaxis=dict(showticklabels=len(analyte_ids) <= 50),
         yaxis=dict(autorange="reversed"),
     )
     return fig

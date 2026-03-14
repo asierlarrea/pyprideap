@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import html as html_mod
 from pathlib import Path
 from typing import Any
 
@@ -344,6 +345,17 @@ footer {
 .toggle-switch input:checked + .toggle-slider::before {
     transform: translateX(18px);
 }
+/* --- Label toggle button --- */
+.label-toggle-btn {
+    display: inline-flex; align-items: center; gap: 5px;
+    margin-left: 8px; padding: 3px 10px;
+    font-size: 0.78em; font-weight: 500;
+    background: #f0f0f0; border: 1px solid var(--border);
+    border-radius: 4px; cursor: pointer; color: var(--text);
+    transition: all 0.2s;
+}
+.label-toggle-btn:hover { background: var(--primary); color: white; border-color: var(--primary); }
+.label-toggle-btn.active { background: var(--primary); color: white; border-color: var(--primary); }
 /* --- Summary table --- */
 .summary-table {
     width: 100%; border-collapse: collapse; font-size: 0.9em;
@@ -438,6 +450,28 @@ document.addEventListener('DOMContentLoaded', function() {
             if (pcaPlot && window.Plotly) Plotly.Plots.resize(pcaPlot);
         }
     };
+    // Label toggle for dimensionality reduction plots
+    window.toggleDimRedLabels = function(btn) {
+        var card = btn.closest('.plot-card');
+        if (!card) return;
+        var plots = card.querySelectorAll('.plotly-graph-div');
+        var showLabels = !btn.classList.contains('active');
+        btn.classList.toggle('active');
+        btn.textContent = showLabels ? 'Hide Labels' : 'Show Labels';
+        plots.forEach(function(plot) {
+            if (!plot.data) return;
+            var update = {mode: showLabels ? 'markers+text' : 'markers'};
+            var indices = [];
+            for (var i = 0; i < plot.data.length; i++) {
+                if (plot.data[i].type === 'scatter' || plot.data[i].type === 'scattergl') {
+                    indices.push(i);
+                }
+            }
+            if (indices.length > 0) {
+                Plotly.restyle(plot, update, indices);
+            }
+        });
+    };
     // PRIDE iframe embedding
     if (window.self !== window.top) {
         document.body.classList.add('pride-embedded');
@@ -458,6 +492,21 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 });
 """
+
+
+def _compact_fig(fig: Any, precision: int = 4) -> Any:
+    """Round float arrays in a Plotly figure to reduce HTML size."""
+    for trace in fig.data:
+        for attr in ("x", "y", "z"):
+            arr = getattr(trace, attr, None)
+            if arr is None:
+                continue
+            try:
+                rounded = np.around(np.asarray(arr, dtype=float), decimals=precision)
+                setattr(trace, attr, rounded.tolist())
+            except (TypeError, ValueError):
+                pass  # non-numeric data (e.g. string labels)
+    return fig
 
 
 def _lod_source_info(dataset: AffinityDataset) -> dict[str, Any]:
@@ -728,7 +777,7 @@ def _render_summary_table(
     # Sample types breakdown
     if "SampleType" in samples.columns:
         type_counts = samples["SampleType"].value_counts()
-        parts = [f"{v}: {c}" for v, c in type_counts.items()]
+        parts = [f"{html_mod.escape(str(v))}: {c}" for v, c in type_counts.items()]
         rows.append(_summary_row("", "Sample types", ", ".join(parts)))
 
     rows.append(_summary_row("", "Features (assays)", str(n_features)))
@@ -741,7 +790,7 @@ def _render_summary_table(
 
     if "Panel" in features.columns:
         panel_counts = features["Panel"].value_counts()
-        parts = [f"{p}: {c}" for p, c in panel_counts.items()]
+        parts = [f"{html_mod.escape(str(p))}: {c}" for p, c in panel_counts.items()]
         rows.append(_summary_row("", "Panels", ", ".join(parts)))
 
     numeric = expr.apply(pd.to_numeric, errors="coerce")
@@ -1106,6 +1155,7 @@ def qc_report(dataset: AffinityDataset, output: str | Path) -> Path:
         if pca_data is not None:
             pca_fig = R.render_pca(pca_data)
             pca_fig.update_layout(height=500)
+            _compact_fig(pca_fig)
             js = "cdn" if need_plotly_cdn else False
             need_plotly_cdn = False  # only include CDN once
             pca_html = pca_fig.to_html(full_html=False, include_plotlyjs=js, default_height="500px")
@@ -1114,6 +1164,7 @@ def qc_report(dataset: AffinityDataset, output: str | Path) -> Path:
         if umap_data is not None:
             tsne_fig = R.render_tsne(umap_data)
             tsne_fig.update_layout(height=500)
+            _compact_fig(tsne_fig)
             js = "cdn" if need_plotly_cdn else False
             tsne_html = tsne_fig.to_html(full_html=False, include_plotlyjs=js, default_height="500px")
             hidden = ' style="display:none"' if pca_data is not None else ""
@@ -1137,6 +1188,17 @@ def qc_report(dataset: AffinityDataset, output: str | Path) -> Path:
         else:
             toggle_html = ""
 
+        # Add label toggle button for large datasets
+        n_dimred_points = max(
+            len(pca_data.labels) if pca_data is not None else 0,
+            len(umap_data.labels) if umap_data is not None else 0,
+        )
+        if n_dimred_points > 200:
+            toggle_html += (
+                '<button class="label-toggle-btn" onclick="toggleDimRedLabels(this)">'
+                "Show Labels</button>"
+            )
+
         rendered["dimreduction"] = ("Dimensionality Reduction", combined_html, toggle_html)
 
     # Find first key if not already set
@@ -1156,6 +1218,7 @@ def qc_report(dataset: AffinityDataset, output: str | Path) -> Path:
         current_height = fig.layout.height
         if current_height is None:
             fig.update_layout(height=500)
+        _compact_fig(fig)
         plot_height = f"{fig.layout.height}px"
         js = "cdn" if key == first_key else False
         plot_html = fig.to_html(full_html=False, include_plotlyjs=js, default_height=plot_height)
