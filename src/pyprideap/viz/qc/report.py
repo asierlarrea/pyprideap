@@ -1,15 +1,20 @@
 from __future__ import annotations
 
+import html as html_mod
 from pathlib import Path
 from typing import Any
 
+import numpy as np
+
 from pyprideap.core import AffinityDataset
 from pyprideap.viz.qc.compute import (
+    ColCheckData,
     CorrelationData,
     CvDistributionData,
     DataCompletenessData,
     DistributionData,
     HeatmapData,
+    IqrMedianQcData,
     LodAnalysisData,
     LodComparisonData,
     NormScaleData,
@@ -17,6 +22,7 @@ from pyprideap.viz.qc.compute import (
     PlateCvData,
     QcLodSummaryData,
     UmapData,
+    UniProtDuplicateData,
     compute_all,
 )
 
@@ -35,10 +41,9 @@ _HELP_TEXT: dict[str, str] = {
         "indicates good data quality. Large WARN or FAIL fractions suggest systematic issues."
     ),
     "lod_analysis": (
-        "Two-panel view. Left: proteins ranked by %% of samples above the Limit of Detection, "
-        "coloured by panel — a steep drop-off reveals how many proteins have weak signal. Right: "
-        "histogram of the same percentages showing the overall distribution. Proteins with low "
-        "%% above LOD are unreliable and may need filtering."
+        "Proteins ranked by the percentage of samples with signal above the Limit of Detection, "
+        "coloured by panel. A steep drop-off reveals how many proteins have weak signal. "
+        "Proteins with low %% above LOD are unreliable and may need filtering."
     ),
     "pca": (
         "Principal Component Analysis projects the high-dimensional protein expression data onto "
@@ -49,16 +54,23 @@ _HELP_TEXT: dict[str, str] = {
     ),  # kept for standalone use; report uses 'dimreduction' instead
     "correlation": (
         "Heatmap of pairwise Pearson correlations between samples based on their protein expression "
-        "profiles. Values range from −1 (inverse) to +1 (perfect correlation). In a well-behaved "
-        "experiment most sample pairs should show high positive correlation (warm colours). A sample "
-        "with consistently low correlation against all others is a potential outlier."
+        "profiles. Samples are grouped by sample type so that controls, biological samples, etc. cluster "
+        "together. Values range from \u22121 (inverse) to +1 (perfect correlation). In a well-behaved "
+        "experiment most biological sample pairs should show high positive correlation (warm colours). "
+        "Control samples (e.g. plate controls, negative controls) are expected to have low correlation "
+        "with biological samples. A biological sample with consistently low correlation against all others "
+        "is a potential outlier."
     ),
     "data_completeness": (
-        "Two side-by-side panels showing data completeness based on the Limit of Detection. "
-        "Left: per-sample stacked bar showing Above LOD (green, reliable signal) vs Below LOD "
+        "Two stacked panels showing data completeness based on the Limit of Detection. "
+        "Note: control samples (negative controls, plate controls, etc.) are excluded — only biological "
+        "samples are shown. "
+        "<strong>Top:</strong> per-sample stacked bar showing Above LOD (green, reliable signal) vs Below LOD "
         "(orange, measured but below detection limit). A sample with a large orange fraction may "
-        "indicate low protein input or technical issues. Right: Missing Frequency distribution — "
-        "a histogram of per-protein missing rate (%% of samples where NPX is below LOD). "
+        "indicate low protein input or technical issues. "
+        "<strong>Bottom:</strong> Missing Frequency distribution — a histogram of per-protein missing rate "
+        "(%% of samples where signal is below LOD). Olink recommends a missing frequency threshold "
+        "of 30%%: proteins above this threshold may be unreliable and should be considered for filtering. "
         "Proteins clustered near 0%% are reliably detected; those near 100%% may need filtering."
     ),
     "dimreduction": (
@@ -80,9 +92,9 @@ _HELP_TEXT: dict[str, str] = {
         "Blocks of correlated colour reveal co-regulated protein groups or sample batches."
     ),
     "cv_distribution": (
-        "Histogram of the coefficient of variation (CV = std / mean) across all proteins. CV measures "
-        "relative variability: values below 0.2 indicate tight reproducibility, while a long right tail "
-        "suggests some proteins have high technical or biological variability."
+        "Histogram of the coefficient of variation (CV = standard deviation / mean) across all proteins. "
+        "CV measures relative variability: values below 0.2 (dashed line) indicate tight reproducibility, "
+        "while a long right tail suggests some proteins have high technical or biological variability."
     ),
     "norm_scale": (
         "Shows the hybridization control normalization scale factor (HybControlNormScale) per sample, "
@@ -103,12 +115,75 @@ _HELP_TEXT: dict[str, str] = {
     ),
     "lod_comparison": (
         "Scatter plot comparing LOD values from different sources for each protein. "
-        "Up to three LOD sources are available: Reported LOD (from the NPX data file), "
-        "NCLOD (computed from negative controls), and FixedLOD (from Olink reference files). "
+        "Available sources: <strong>Reported LOD</strong> (from the data file), "
+        "<strong>NCLOD</strong> (computed from negative controls), and "
+        "<strong>FixedLOD</strong> (from Olink reference files) or <strong>eLOD</strong> (SomaScan buffer-based). "
         "Each point represents one protein — points on the diagonal indicate agreement between "
-        "the two sources. Use the dropdown to switch between available LOD source pairs. "
-        "The Pearson correlation (r) and number of proteins (n) are shown. "
-        "Large deviations from the diagonal may indicate batch effects or sample quality issues."
+        "the two sources. Use the dropdown to switch between source pairs. "
+        "The Pearson correlation (r) and number of assays (n) are shown; n may be lower than total assays "
+        "because only assays with valid LOD from both sources are included. "
+        "When sources disagree significantly, NCLOD (experiment-specific) is generally preferred for "
+        "filtering, as it reflects the actual noise level in your experiment. "
+        "The LOD source used for all other analyses in this report is shown in the LOD Sources card above."
+    ),
+    "outlier_map": (
+        "Heatmap showing MAD-based statistical outliers across all samples and analytes. "
+        "Red cells indicate that a sample's RFU value for that analyte exceeded both "
+        "|x &minus; median(x)| &gt; 6 &times; MAD(x) <strong>and</strong> a fold-change &gt; 5&times; "
+        "from the analyte median (matching SomaDataIO's <code>calcOutlierMap()</code>). "
+        "Samples with a large number of red cells across many analytes may be technical outliers. "
+        "The default flagging threshold is 5%% of analytes — samples exceeding this are candidates for removal."
+    ),
+    "row_check": (
+        "Summary of sample-level normalization QC (RowCheck). Each sample's normalization scale factors "
+        "(e.g. HybControlNormScale) are checked against the acceptance range [0.4, 2.5]. "
+        "Samples where <strong>all</strong> normalization scales fall within this range receive PASS; "
+        "others are flagged as FLAG. Flagged samples may have experienced hybridization issues or "
+        "unusually high/low overall signal and should be considered for exclusion."
+    ),
+    "col_check": (
+        "Calibrator QC ratio for each analyte. The ratio measures how well each analyte's calibration "
+        "matches the reference (ideal = 1.0). Analytes within the acceptance range [0.8, 1.2] (orange "
+        "dashed lines) pass QC; those outside are flagged (red points). Flagged analytes may have poor "
+        "calibration reproducibility and should be interpreted with caution. A high number of flagged "
+        "analytes may indicate plate-level calibration issues."
+    ),
+    "control_analytes": (
+        "Breakdown of control analyte types detected in the SomaScan data. "
+        "<strong>HybControlElution</strong>: hybridization control probes used to monitor assay performance. "
+        "<strong>Spuriomer</strong>: aptamers with known non-specific binding. "
+        "<strong>NonBiotin</strong>: non-biotinylated controls. "
+        "<strong>NonHuman</strong>: non-human protein targets (e.g. bacterial, viral). "
+        "<strong>NonCleavable</strong>: non-cleavable linker controls. "
+        "These are typically removed before downstream analysis (equivalent to "
+        "<code>getAnalytes(rm.controls=TRUE)</code> in SomaDataIO)."
+    ),
+    "norm_scale_boxplot": (
+        "Boxplots of normalization scale factors (e.g. HybControlNormScale, Med.Scale.*) grouped by "
+        "a categorical variable (e.g. PlateId). Red dashed lines mark the acceptance thresholds at "
+        "0.4 and 2.5 — samples outside these bounds fail RowCheck. Equivalent to the <code>data.qc</code> "
+        "plots in SomaDataIO's <code>preProcessAdat()</code>. "
+        "Look for systematic differences between groups that might indicate batch effects."
+    ),
+    "iqr_median_qc": (
+        "Per-panel scatter plot of IQR (Interquartile Range) vs Median NPX per sample, mirroring "
+        "OlinkAnalyze's <code>olink_qc_plot()</code>. The IQR (Q3 &minus; Q1) measures the spread of "
+        "the middle 50%% of a sample's protein measurements — a large IQR indicates high variability. "
+        "For each panel, IQR and median are computed per sample. "
+        "Outlier thresholds (dashed lines) are set at mean &plusmn; 3 &times; SD on both axes. "
+        "Samples outside these bounds on either axis are flagged as outliers (red points). "
+        "Points are coloured by QC status (green = Pass, orange = Warning). Outlier samples may "
+        "indicate technical issues such as failed wells, low protein input, or plate effects."
+    ),
+    "uniprot_duplicates": (
+        "Bar chart showing proteins targeted by multiple assays (e.g. multiple OlinkIDs or aptamers "
+        "mapping to the same UniProt accession). In some platforms this is <strong>by design</strong> — "
+        "e.g. SomaScan includes replicate aptamers for redundancy, and Olink panels may overlap. "
+        "Multiple assays per protein can be used to assess measurement concordance: "
+        "high agreement between replicate assays confirms reliability, while poor concordance "
+        "may indicate assay-specific issues. "
+        "For downstream pathway or gene-set enrichment analyses, be aware that duplicated proteins "
+        "may inflate counts unless handled (e.g. by averaging or selecting the best-performing assay)."
     ),
 }
 
@@ -119,6 +194,8 @@ _SECTION_ORDER = [
     ("Sample Relationships", ["dimreduction", "correlation", "heatmap"]),
     ("Normalization QC", ["norm_scale"]),
     ("Variability", ["cv_distribution", "plate_cv"]),
+    ("Olink QC", ["iqr_median_qc", "uniprot_duplicates"]),
+    ("SomaScan QC", ["col_check"]),
 ]
 
 _CSS = """\
@@ -280,6 +357,39 @@ footer {
 .toggle-switch input:checked + .toggle-slider::before {
     transform: translateX(18px);
 }
+/* --- Label toggle button --- */
+.label-toggle-btn {
+    display: inline-flex; align-items: center; gap: 5px;
+    margin-left: 8px; padding: 3px 10px;
+    font-size: 0.78em; font-weight: 500;
+    background: #f0f0f0; border: 1px solid var(--border);
+    border-radius: 4px; cursor: pointer; color: var(--text);
+    transition: all 0.2s;
+}
+.label-toggle-btn:hover { background: var(--primary); color: white; border-color: var(--primary); }
+.label-toggle-btn.active { background: var(--primary); color: white; border-color: var(--primary); }
+/* --- Summary table --- */
+.summary-table {
+    width: 100%; border-collapse: collapse; font-size: 0.9em;
+}
+.summary-table td { padding: 6px 12px; border-bottom: 1px solid var(--border); }
+.summary-table .summary-group td {
+    background: #e8f8f8; font-weight: 600; color: var(--heading);
+    font-size: 0.88em; text-transform: uppercase; letter-spacing: 0.04em;
+    padding: 10px 12px; border-bottom: 2px solid var(--primary);
+}
+.summary-table .metric-name { color: var(--text); }
+.summary-table .metric-value { font-weight: 500; text-align: right; }
+.summary-table .metric-sub {
+    font-size: 0.85em; color: var(--text-muted); padding-left: 8px;
+}
+.status-dot {
+    display: inline-block; width: 12px; height: 12px; border-radius: 50%;
+    vertical-align: middle;
+}
+.dot-green { background: #2ecc71; }
+.dot-amber { background: #f39c12; }
+.dot-red { background: #e74c3c; }
 /* --- PRIDE embedded mode --- */
 body.pride-embedded {
     --bg: transparent;
@@ -352,6 +462,28 @@ document.addEventListener('DOMContentLoaded', function() {
             if (pcaPlot && window.Plotly) Plotly.Plots.resize(pcaPlot);
         }
     };
+    // Label toggle for dimensionality reduction plots
+    window.toggleDimRedLabels = function(btn) {
+        var card = btn.closest('.plot-card');
+        if (!card) return;
+        var plots = card.querySelectorAll('.plotly-graph-div');
+        var showLabels = !btn.classList.contains('active');
+        btn.classList.toggle('active');
+        btn.textContent = showLabels ? 'Hide Labels' : 'Show Labels';
+        plots.forEach(function(plot) {
+            if (!plot.data) return;
+            var update = {mode: showLabels ? 'markers+text' : 'markers'};
+            var indices = [];
+            for (var i = 0; i < plot.data.length; i++) {
+                if (plot.data[i].type === 'scatter' || plot.data[i].type === 'scattergl') {
+                    indices.push(i);
+                }
+            }
+            if (indices.length > 0) {
+                Plotly.restyle(plot, update, indices);
+            }
+        });
+    };
     // PRIDE iframe embedding
     if (window.self !== window.top) {
         document.body.classList.add('pride-embedded');
@@ -372,6 +504,21 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 });
 """
+
+
+def _compact_fig(fig: Any, precision: int = 4) -> Any:
+    """Round float arrays in a Plotly figure to reduce HTML size."""
+    for trace in fig.data:
+        for attr in ("x", "y", "z"):
+            arr = getattr(trace, attr, None)
+            if arr is None:
+                continue
+            try:
+                rounded = np.around(np.asarray(arr, dtype=float), decimals=precision)
+                setattr(trace, attr, rounded.tolist())
+            except (TypeError, ValueError):
+                pass  # non-numeric data (e.g. string labels)
+    return fig
 
 
 def _lod_source_info(dataset: AffinityDataset) -> dict[str, Any]:
@@ -571,39 +718,360 @@ def _render_lod_card(lod_info: dict[str, Any]) -> str:
 
 def _count_proteins_above_lod(dataset: AffinityDataset) -> int | None:
     """Count unique proteins where >50% of samples are above LOD."""
-    import pandas as pd
-
     try:
-        from pyprideap.processing.lod import _above_lod_matrix, get_lod_values
+        from pyprideap.processing.lod import get_proteins_above_lod
     except ImportError:
         return None
 
-    lod = get_lod_values(dataset)
-    if lod is None:
-        return None
+    proteins = get_proteins_above_lod(dataset)
+    return len(proteins) if proteins is not None else None
 
-    numeric = dataset.expression.apply(pd.to_numeric, errors="coerce")
-    above_lod, has_lod = _above_lod_matrix(numeric, lod)
 
-    if "UniProt" not in dataset.features.columns:
-        return None
+def _status_dot(level: str) -> str:
+    """Return an HTML span for a traffic-light status dot."""
+    if level == "green":
+        return '<span class="status-dot dot-green"></span>'
+    if level == "amber":
+        return '<span class="status-dot dot-amber"></span>'
+    if level == "red":
+        return '<span class="status-dot dot-red"></span>'
+    return ""
 
-    oid_col = "OlinkID" if "OlinkID" in dataset.features.columns else dataset.features.columns[0]
-    oid_to_uniprot = dict(zip(dataset.features[oid_col], dataset.features["UniProt"]))
 
-    proteins_above: set[str] = set()
-    for col in numeric.columns:
-        valid = numeric[col].notna() & has_lod[col]
-        n = int(valid.sum())
-        if n == 0:
-            continue
-        pct = float(above_lod.loc[valid, col].sum() / n * 100)
-        if pct > 50:
-            up = oid_to_uniprot.get(col)
-            if up and pd.notna(up):
-                proteins_above.add(up)
+def _summary_row(dot: str, name: str, value: str) -> str:
+    return (
+        f"<tr>"
+        f'<td style="width:28px;text-align:center;">{dot}</td>'
+        f'<td class="metric-name">{name}</td>'
+        f'<td class="metric-value">{value}</td>'
+        f"</tr>"
+    )
 
-    return len(proteins_above)
+
+def _summary_group(title: str) -> str:
+    return f'<tr class="summary-group"><td colspan="3">{title}</td></tr>'
+
+
+def _render_summary_table(
+    dataset: AffinityDataset,
+    plot_data: dict[str, object],
+    lod_info: dict[str, Any],
+) -> str:
+    """Build the Dataset Summary HTML table with traffic-light indicators."""
+    import pandas as pd
+
+    from pyprideap.viz.qc.compute import CvDistributionData, DataCompletenessData, LodAnalysisData, PlateCvData
+
+    rows: list[str] = []
+    samples = dataset.samples
+    features = dataset.features
+    expr = dataset.expression
+    n_samples = len(samples)
+    n_features = len(features)
+
+    # --- General ---
+    rows.append(_summary_group("General"))
+    platform_label = dataset.platform.value.replace("_", " ").title()
+    rows.append(_summary_row("", "Platform", platform_label))
+
+    # Plates — check both column name variants
+    plate_col = None
+    for col in ("PlateID", "PlateId"):
+        if col in samples.columns:
+            plate_col = col
+            break
+    if plate_col is not None:
+        n_plates = int(samples[plate_col].nunique())
+        rows.append(_summary_row("", "Plates", str(n_plates)))
+
+    rows.append(_summary_row("", "Samples", str(n_samples)))
+
+    # Sample types breakdown
+    if "SampleType" in samples.columns:
+        type_counts = samples["SampleType"].value_counts()
+        parts = [f"{html_mod.escape(str(v))}: {c}" for v, c in type_counts.items()]
+        rows.append(_summary_row("", "Sample types", ", ".join(parts)))
+
+    rows.append(_summary_row("", "Features (assays)", str(n_features)))
+
+    # QC columns available in the dataset
+    _known_qc_cols = [
+        "SampleQC",
+        "QC_Warning",
+        "AssayQC",
+        "SampleType",
+        "RowCheck",
+        "ColCheck",
+        "HybControlNormScale",
+    ]
+    qc_cols_found = [c for c in _known_qc_cols if c in samples.columns or c in features.columns]
+    if qc_cols_found:
+        rows.append(_summary_row("", "QC columns", ", ".join(qc_cols_found)))
+    else:
+        rows.append(_summary_row(_status_dot("amber"), "QC columns", "None detected — QC metrics may be limited"))
+
+    # --- Proteins ---
+    rows.append(_summary_group("Proteins"))
+    if "UniProt" in features.columns:
+        n_proteins = int(features["UniProt"].dropna().nunique())
+        rows.append(_summary_row("", "Unique proteins", str(n_proteins)))
+
+    if "Panel" in features.columns:
+        panel_counts = features["Panel"].value_counts()
+        parts = [f"{html_mod.escape(str(p))}: {c}" for p, c in panel_counts.items()]
+        rows.append(_summary_row("", "Panels", ", ".join(parts)))
+
+    numeric = expr.apply(pd.to_numeric, errors="coerce")
+    proteins_per_sample = numeric.notna().sum(axis=1)
+    median_per_sample = float(proteins_per_sample.median())
+    rows.append(_summary_row("", "Proteins per sample (median)", f"{median_per_sample:.0f}"))
+
+    # --- Missing Data ---
+    rows.append(_summary_group("Missing Data"))
+    total_cells = numeric.size
+    if total_cells > 0:
+        detection_rate = float(numeric.notna().sum().sum() / total_cells)
+    else:
+        detection_rate = 0.0
+    if detection_rate > 0.90:
+        dr_dot = _status_dot("green")
+    elif detection_rate >= 0.70:
+        dr_dot = _status_dot("amber")
+    else:
+        dr_dot = _status_dot("red")
+    rows.append(_summary_row(dr_dot, "Detection rate", f"{detection_rate:.1%}"))
+
+    # Samples with >20% missing
+    row_miss = numeric.isna().mean(axis=1)
+    n_high_miss_samples = int((row_miss > 0.2).sum())
+    if n_high_miss_samples == 0:
+        hms_dot = _status_dot("green")
+    elif n_samples > 0 and n_high_miss_samples / n_samples <= 0.10:
+        hms_dot = _status_dot("amber")
+    else:
+        hms_dot = _status_dot("red")
+    rows.append(_summary_row(hms_dot, "Samples with &gt;20% missing", str(n_high_miss_samples)))
+
+    # Proteins with >50% missing
+    col_miss = numeric.isna().mean(axis=0)
+    n_high_miss_prot = int((col_miss > 0.5).sum())
+    if n_high_miss_prot == 0:
+        hmp_dot = _status_dot("green")
+    elif n_features > 0 and n_high_miss_prot / n_features <= 0.05:
+        hmp_dot = _status_dot("amber")
+    else:
+        hmp_dot = _status_dot("red")
+    rows.append(_summary_row(hmp_dot, "Proteins with &gt;50% missing", str(n_high_miss_prot)))
+
+    # --- LOD ---
+    lod_active = lod_info.get("active")
+    lod_analysis = plot_data.get("lod_analysis")
+    data_completeness = plot_data.get("data_completeness")
+    has_any_lod = lod_active is not None or lod_analysis is not None or data_completeness is not None
+    if has_any_lod:
+        rows.append(_summary_group("Limit of Detection"))
+        if lod_active is not None:
+            rows.append(_summary_row("", "LOD source", str(lod_active)))
+
+        if isinstance(lod_analysis, LodAnalysisData) and len(lod_analysis.above_lod_pct) > 0:
+            n_above = sum(1 for p in lod_analysis.above_lod_pct if p > 50)
+            n_total = len(lod_analysis.above_lod_pct)
+            frac_above = n_above / n_total
+            if frac_above > 0.80:
+                lod_dot = _status_dot("green")
+            elif frac_above >= 0.50:
+                lod_dot = _status_dot("amber")
+            else:
+                lod_dot = _status_dot("red")
+            rows.append(
+                _summary_row(
+                    lod_dot,
+                    "Assays above LOD in &gt;50% of samples",
+                    f"{n_above} / {n_total} ({frac_above:.1%})",
+                )
+            )
+
+        if isinstance(data_completeness, DataCompletenessData) and len(data_completeness.above_lod_rate) > 0:
+            overall_above = float(np.mean(data_completeness.above_lod_rate))
+            if overall_above > 0.75:
+                oa_dot = _status_dot("green")
+            elif overall_above >= 0.50:
+                oa_dot = _status_dot("amber")
+            else:
+                oa_dot = _status_dot("red")
+            rows.append(_summary_row(oa_dot, "Overall above-LOD rate", f"{overall_above:.1%}"))
+
+    # --- Variability ---
+    cv_data = plot_data.get("cv_distribution")
+    plate_cv_data = plot_data.get("plate_cv")
+    has_cv = (isinstance(cv_data, CvDistributionData) and len(cv_data.cv_values) > 0) or (
+        isinstance(plate_cv_data, PlateCvData) and len(plate_cv_data.inter_cv) > 0
+    )
+    if has_cv:
+        rows.append(_summary_group("Variability"))
+        if isinstance(cv_data, CvDistributionData) and len(cv_data.cv_values) > 0:
+            if n_samples < 2:
+                rows.append(_summary_row("", "Median CV", "N/A (single sample)"))
+                rows.append(_summary_row("", "CV range (5th\u201395th pctl)", "N/A"))
+            else:
+                med_cv = float(np.median(cv_data.cv_values))
+                if med_cv < 0.15:
+                    cv_dot = _status_dot("green")
+                elif med_cv <= 0.25:
+                    cv_dot = _status_dot("amber")
+                else:
+                    cv_dot = _status_dot("red")
+                rows.append(_summary_row(cv_dot, "Median CV", f"{med_cv:.1%}"))
+                p5, p95 = np.percentile(cv_data.cv_values, [5, 95])
+                rows.append(_summary_row("", "CV range (5th\u201395th pctl)", f"{p5:.1%} \u2013 {p95:.1%}"))
+
+        if isinstance(plate_cv_data, PlateCvData) and len(plate_cv_data.inter_cv) > 0:
+            med_inter = float(np.median(plate_cv_data.inter_cv))
+            if med_inter < 0.20:
+                pi_dot = _status_dot("green")
+            elif med_inter <= 0.30:
+                pi_dot = _status_dot("amber")
+            else:
+                pi_dot = _status_dot("red")
+            rows.append(_summary_row(pi_dot, "Median inter-plate CV", f"{med_inter:.1%}"))
+
+    # --- Expression ---
+    rows.append(_summary_group("Expression"))
+    vals = numeric.values.flatten()
+    vals_clean = vals[~np.isnan(vals)] if len(vals) > 0 else vals
+    if len(vals_clean) > 0:
+        med_expr = float(np.median(vals_clean))
+        dyn_range = float(np.max(vals_clean) - np.min(vals_clean))
+        sd_expr = float(np.std(vals_clean))
+        rows.append(_summary_row("", "Median expression", f"{med_expr:.2f}"))
+        rows.append(_summary_row("", "Dynamic range", f"{dyn_range:.2f}"))
+        rows.append(_summary_row("", "SD of expression", f"{sd_expr:.2f}"))
+    else:
+        rows.append(_summary_row("", "Median expression", "N/A"))
+        rows.append(_summary_row("", "Dynamic range", "N/A"))
+        rows.append(_summary_row("", "SD of expression", "N/A"))
+
+    # --- QC Status (Olink only) ---
+    if "SampleQC" in samples.columns:
+        rows.append(_summary_group("QC Status"))
+        qc_counts = samples["SampleQC"].value_counts()
+        n_pass = int(qc_counts.get("PASS", 0))
+        n_warn = int(qc_counts.get("WARN", 0))
+        n_fail = int(qc_counts.get("FAIL", 0))
+        fail_rate = n_fail / n_samples if n_samples > 0 else 0.0
+        if fail_rate == 0:
+            qc_dot = _status_dot("green")
+        elif fail_rate < 0.10:
+            qc_dot = _status_dot("amber")
+        else:
+            qc_dot = _status_dot("red")
+        rows.append(_summary_row(qc_dot, "PASS / WARN / FAIL", f"{n_pass} / {n_warn} / {n_fail}"))
+
+    # --- Normalization (SomaScan only) ---
+    if "HybControlNormScale" in samples.columns:
+        rows.append(_summary_group("Normalization"))
+        hyb = pd.to_numeric(samples["HybControlNormScale"], errors="coerce")
+        med_hyb = float(hyb.median())
+        if 0.8 <= med_hyb <= 1.2:
+            hyb_dot = _status_dot("green")
+        elif 0.4 <= med_hyb <= 2.5:
+            hyb_dot = _status_dot("amber")
+        else:
+            hyb_dot = _status_dot("red")
+        rows.append(_summary_row(hyb_dot, "Median HybControlNormScale", f"{med_hyb:.3f}"))
+
+        n_outside = int(((hyb < 0.4) | (hyb > 2.5)).sum())
+        outside_rate = n_outside / n_samples if n_samples > 0 else 0.0
+        if n_outside == 0:
+            out_dot = _status_dot("green")
+        elif outside_rate < 0.05:
+            out_dot = _status_dot("amber")
+        else:
+            out_dot = _status_dot("red")
+        rows.append(_summary_row(out_dot, "Samples outside 0.4\u20132.5", str(n_outside)))
+
+    # --- Olink QC ---
+    from pyprideap.core import Platform as _Platform
+
+    iqr_median_data = plot_data.get("iqr_median_qc")
+    uniprot_dup_data = plot_data.get("uniprot_duplicates")
+    has_olink_qc = isinstance(iqr_median_data, IqrMedianQcData) or isinstance(uniprot_dup_data, UniProtDuplicateData)
+    if has_olink_qc:
+        rows.append(_summary_group("Olink QC"))
+
+        if isinstance(iqr_median_data, IqrMedianQcData):
+            n_outlier = iqr_median_data.n_outlier_samples
+            n_total = iqr_median_data.n_total_samples
+            outlier_rate = n_outlier / n_total if n_total > 0 else 0.0
+            if n_outlier == 0:
+                iqr_dot = _status_dot("green")
+            elif outlier_rate < 0.10:
+                iqr_dot = _status_dot("amber")
+            else:
+                iqr_dot = _status_dot("red")
+            rows.append(
+                _summary_row(
+                    iqr_dot,
+                    "IQR/Median outlier samples",
+                    f"{n_outlier} / {n_total}",
+                )
+            )
+
+        if isinstance(uniprot_dup_data, UniProtDuplicateData):
+            n_affected = uniprot_dup_data.n_affected_assays
+            n_total_assays = uniprot_dup_data.n_total_assays
+            if n_affected == 0:
+                dup_dot = _status_dot("green")
+            elif n_total_assays > 0 and n_affected / n_total_assays < 0.05:
+                dup_dot = _status_dot("amber")
+            else:
+                dup_dot = _status_dot("red")
+            rows.append(
+                _summary_row(
+                    dup_dot,
+                    "UniProt duplicate assays",
+                    f"{n_affected} / {n_total_assays}",
+                )
+            )
+
+    # --- SomaScan QC Flags ---
+    if dataset.platform == _Platform.SOMASCAN:
+        col_check_data = plot_data.get("col_check")
+
+        if isinstance(col_check_data, ColCheckData):
+            rows.append(_summary_group("SomaScan QC"))
+            total = col_check_data.n_pass + col_check_data.n_flag
+            flag_rate = col_check_data.n_flag / total if total > 0 else 0.0
+            if col_check_data.n_flag == 0:
+                cc_dot = _status_dot("green")
+            elif flag_rate < 0.05:
+                cc_dot = _status_dot("amber")
+            else:
+                cc_dot = _status_dot("red")
+            rows.append(
+                _summary_row(
+                    cc_dot,
+                    "ColCheck (PASS / FLAG)",
+                    f"{col_check_data.n_pass} / {col_check_data.n_flag}",
+                )
+            )
+
+    table_html = f'<table class="summary-table">{"".join(rows)}</table>'
+
+    return (
+        '<div class="plot-card" id="dataset-summary">'
+        '<div class="plot-header">'
+        "<h3>Dataset Summary</h3>"
+        '<button class="help-toggle" title="About dataset summary" aria-label="Help">?</button>'
+        "</div>"
+        '<div class="help-text">'
+        "Overview of key dataset quality metrics. "
+        "Green/amber/red indicators show whether metrics fall within "
+        "recommended ranges for the platform."
+        "</div>"
+        f"{table_html}"
+        "</div>"
+    )
 
 
 def qc_report(dataset: AffinityDataset, output: str | Path) -> Path:
@@ -629,6 +1097,11 @@ def qc_report(dataset: AffinityDataset, output: str | Path) -> Path:
         "cv_distribution": (CvDistributionData, R.render_cv_distribution),
         "plate_cv": (PlateCvData, R.render_plate_cv),
         "norm_scale": (NormScaleData, R.render_norm_scale),
+        # Olink-specific renderers
+        "iqr_median_qc": (IqrMedianQcData, R.render_iqr_median_qc),
+        "uniprot_duplicates": (UniProtDuplicateData, R.render_uniprot_duplicates),
+        # SomaScan-specific renderers
+        "col_check": (ColCheckData, R.render_col_check),
     }
 
     # Determine display order from _SECTION_ORDER so first-displayed plot gets plotly.js
@@ -663,6 +1136,7 @@ def qc_report(dataset: AffinityDataset, output: str | Path) -> Path:
         if pca_data is not None:
             pca_fig = R.render_pca(pca_data)
             pca_fig.update_layout(height=500)
+            _compact_fig(pca_fig)
             js = "cdn" if need_plotly_cdn else False
             need_plotly_cdn = False  # only include CDN once
             pca_html = pca_fig.to_html(full_html=False, include_plotlyjs=js, default_height="500px")
@@ -671,6 +1145,7 @@ def qc_report(dataset: AffinityDataset, output: str | Path) -> Path:
         if umap_data is not None:
             tsne_fig = R.render_tsne(umap_data)
             tsne_fig.update_layout(height=500)
+            _compact_fig(tsne_fig)
             js = "cdn" if need_plotly_cdn else False
             tsne_html = tsne_fig.to_html(full_html=False, include_plotlyjs=js, default_height="500px")
             hidden = ' style="display:none"' if pca_data is not None else ""
@@ -694,6 +1169,9 @@ def qc_report(dataset: AffinityDataset, output: str | Path) -> Path:
         else:
             toggle_html = ""
 
+        # Add label toggle button (labels are hidden by default for all datasets)
+        toggle_html += '<button class="label-toggle-btn" onclick="toggleDimRedLabels(this)">Show Labels</button>'
+
         rendered["dimreduction"] = ("Dimensionality Reduction", combined_html, toggle_html)
 
     # Find first key if not already set
@@ -713,10 +1191,15 @@ def qc_report(dataset: AffinityDataset, output: str | Path) -> Path:
         current_height = fig.layout.height
         if current_height is None:
             fig.update_layout(height=500)
+        _compact_fig(fig)
         plot_height = f"{fig.layout.height}px"
         js = "cdn" if key == first_key else False
         plot_html = fig.to_html(full_html=False, include_plotlyjs=js, default_height=plot_height)
         rendered[key] = (data.title, plot_html)  # type: ignore[attr-defined]
+
+    # LOD source summary card (computed early for use in summary table)
+    lod_info = _lod_source_info(dataset)
+    lod_card_html = _render_lod_card(lod_info)
 
     # Build grouped sections and TOC with section labels
     toc_html_parts: list[str] = []
@@ -750,6 +1233,13 @@ def qc_report(dataset: AffinityDataset, output: str | Path) -> Path:
             toc_html_parts.append(f'<div class="toc-group-label">{group_title}</div>')
             toc_html_parts.append(f"<ul>{''.join(group_toc_items)}</ul>")
             group_sections.append(f'<div class="section-group"><h2>{group_title}</h2>{"".join(cards)}</div>')
+    # Dataset Summary section (always last)
+    summary_html = _render_summary_table(dataset, plot_data, lod_info)
+    summary_section = f'<div class="section-group"><h2>Dataset Summary</h2>{summary_html}</div>'
+    group_sections.append(summary_section)
+    toc_html_parts.append('<div class="toc-group-label">Summary</div>')
+    toc_html_parts.append('<ul><li><a href="#dataset-summary">Dataset Summary</a></li></ul>')
+
     toc_inner = "".join(toc_html_parts)
 
     platform_label = dataset.platform.value.replace("_", " ").title()
@@ -764,19 +1254,18 @@ def qc_report(dataset: AffinityDataset, output: str | Path) -> Path:
     # Proteins above LOD (>50% of samples)
     n_proteins_above_lod = _count_proteins_above_lod(dataset)
 
-    # LOD source summary card
-    lod_info = _lod_source_info(dataset)
-    lod_card_html = _render_lod_card(lod_info)
-
     stat_items = [
         f'<span class="stat-item"><strong>Platform</strong> {platform_label}</span>',
         f'<span class="stat-item"><strong>Samples</strong> {n_samples}</span>',
-        f'<span class="stat-item"><strong>Proteins (Assays)</strong> {n_features}</span>',
+        f'<span class="stat-item"><strong>Assays</strong> {n_features}</span>',
     ]
-    if n_proteins > 0:
-        stat_items.append(f'<span class="stat-item"><strong>Proteins</strong> {n_proteins}</span>')
-    if n_proteins_above_lod is not None:
-        stat_items.append(f'<span class="stat-item"><strong>Proteins &gt; LOD</strong> {n_proteins_above_lod}</span>')
+    if n_proteins > 0 and n_proteins != n_features:
+        stat_items.append(f'<span class="stat-item"><strong>Unique Proteins</strong> {n_proteins}</span>')
+    if n_proteins_above_lod is not None and n_proteins_above_lod > 0:
+        stat_items.append(
+            f'<span class="stat-item" title="Unique proteins where &gt;50%% of samples have signal above LOD">'
+            f"<strong>Proteins &gt; LOD</strong> {n_proteins_above_lod}</span>"
+        )
 
     html = (
         '<!DOCTYPE html>\n<html lang="en">\n<head>\n'
@@ -807,3 +1296,134 @@ def qc_report(dataset: AffinityDataset, output: str | Path) -> Path:
 
     output.write_text(html)
     return output
+
+
+def _wrap_standalone_html(title: str, body: str, include_plotlyjs: bool = True) -> str:
+    """Wrap plot HTML in a standalone page with PRIDE styling."""
+    plotly_cdn = '<script src="https://cdn.plot.ly/plotly-latest.min.js"></script>\n' if include_plotlyjs else ""
+    return (
+        f'<!DOCTYPE html>\n<html lang="en">\n<head>\n'
+        f'    <meta charset="utf-8">\n'
+        f'    <meta name="viewport" content="width=device-width, initial-scale=1">\n'
+        f"    <title>{title}</title>\n"
+        f"    {plotly_cdn}"
+        f"    <style>\n{_CSS}    </style>\n"
+        f"</head>\n<body>\n"
+        f'<div style="max-width:1100px;margin:0 auto;padding:28px 36px;">\n'
+        f"{body}\n"
+        f"</div>\n"
+        f"    <script>\n{_JS}    </script>\n"
+        f"</body>\n</html>"
+    )
+
+
+def qc_report_split(dataset: AffinityDataset, output_dir: str | Path) -> Path:
+    """Generate individual QC plot HTML files in a directory.
+
+    Each plot is saved as a standalone HTML file named by its plot type
+    (e.g., ``distribution.html``, ``correlation.html``). A ``summary.html``
+    file with the dataset summary table is always generated.
+
+    Parameters
+    ----------
+    dataset : AffinityDataset
+        The dataset to generate plots for.
+    output_dir : str | Path
+        Directory to write individual HTML files into. Created if it doesn't exist.
+
+    Returns
+    -------
+    Path
+        The output directory path.
+    """
+    try:
+        import plotly  # noqa: F401
+    except ImportError:
+        raise ImportError("Plotly is required for HTML reports. Install with: pip install pyprideap[plots]") from None
+
+    from pyprideap.viz.qc import render as R
+
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    plot_data = compute_all(dataset)
+    lod_info = _lod_source_info(dataset)
+    platform_label = dataset.platform.value.replace("_", " ").title()
+
+    _RENDERERS: dict[str, tuple[type, Any]] = {
+        "lod_comparison": (LodComparisonData, R.render_lod_comparison),
+        "distribution": (DistributionData, R.render_distribution),
+        "qc_summary": (QcLodSummaryData, R.render_qc_summary),
+        "lod_analysis": (LodAnalysisData, R.render_lod_analysis),
+        "heatmap": (HeatmapData, R.render_heatmap),
+        "correlation": (CorrelationData, R.render_correlation),
+        "data_completeness": (DataCompletenessData, R.render_data_completeness),
+        "cv_distribution": (CvDistributionData, R.render_cv_distribution),
+        "plate_cv": (PlateCvData, R.render_plate_cv),
+        "norm_scale": (NormScaleData, R.render_norm_scale),
+        # Olink-specific renderers
+        "iqr_median_qc": (IqrMedianQcData, R.render_iqr_median_qc),
+        "uniprot_duplicates": (UniProtDuplicateData, R.render_uniprot_duplicates),
+        # SomaScan-specific renderers
+        "col_check": (ColCheckData, R.render_col_check),
+    }
+
+    written: list[str] = []
+
+    # Render each plot as a standalone HTML file
+    for key, (dtype, renderer) in _RENDERERS.items():
+        data = plot_data.get(key)
+        if data is None or not isinstance(data, dtype):
+            continue
+        fig = renderer(data)  # type: ignore[operator]
+        current_height = fig.layout.height
+        if current_height is None:
+            fig.update_layout(height=500)
+        plot_height = f"{fig.layout.height}px"
+        plot_html = fig.to_html(full_html=False, include_plotlyjs=False, default_height=plot_height)
+        title = getattr(data, "title", key.replace("_", " ").title())
+        help_html = _HELP_TEXT.get(key, "")
+        help_block = f'<div class="help-text open">{help_html}</div>' if help_html else ""
+        body = f'<div class="plot-card"><div class="plot-header"><h3>{title}</h3></div>{help_block}{plot_html}</div>'
+        page = _wrap_standalone_html(f"{title} — {platform_label}", body)
+        (output_dir / f"{key}.html").write_text(page)
+        written.append(key)
+
+    # PCA and t-SNE as separate files
+    _pca_raw = plot_data.get("pca")
+    _umap_raw = plot_data.get("umap")
+    pca_data: PcaData | None = _pca_raw if isinstance(_pca_raw, PcaData) else None
+    umap_data: UmapData | None = _umap_raw if isinstance(_umap_raw, UmapData) else None
+
+    if pca_data is not None:
+        fig = R.render_pca(pca_data)
+        fig.update_layout(height=500)
+        plot_html = fig.to_html(full_html=False, include_plotlyjs=False, default_height="500px")
+        body = f'<div class="plot-card"><div class="plot-header"><h3>PCA</h3></div>{plot_html}</div>'
+        page = _wrap_standalone_html(f"PCA — {platform_label}", body)
+        (output_dir / "pca.html").write_text(page)
+        written.append("pca")
+
+    if umap_data is not None:
+        nl_method = umap_data.title if hasattr(umap_data, "title") else "t-SNE"
+        fig = R.render_tsne(umap_data)
+        fig.update_layout(height=500)
+        plot_html = fig.to_html(full_html=False, include_plotlyjs=False, default_height="500px")
+        body = f'<div class="plot-card"><div class="plot-header"><h3>{nl_method}</h3></div>{plot_html}</div>'
+        page = _wrap_standalone_html(f"{nl_method} — {platform_label}", body)
+        (output_dir / "tsne.html").write_text(page)
+        written.append("tsne")
+
+    # LOD sources card
+    lod_card_html = _render_lod_card(lod_info)
+    page = _wrap_standalone_html(f"LOD Sources — {platform_label}", lod_card_html, include_plotlyjs=False)
+    (output_dir / "lod_sources.html").write_text(page)
+    written.append("lod_sources")
+
+    # Summary table
+    summary_html = _render_summary_table(dataset, plot_data, lod_info)
+    page = _wrap_standalone_html(f"Dataset Summary — {platform_label}", summary_html, include_plotlyjs=False)
+    (output_dir / "summary.html").write_text(page)
+    written.append("summary")
+
+    return output_dir

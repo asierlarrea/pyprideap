@@ -35,6 +35,7 @@ class LodAnalysisData:
     above_lod_pct: list[float]
     panel: list[str]
     title: str = "LOD Analysis: % Samples Above LOD"
+    unit: str = "NPX"  # "NPX" for Olink, "RFU" for SomaScan
 
 
 @dataclass
@@ -115,6 +116,7 @@ class LodComparisonData:
     pairs: list[dict]
     """Each dict has keys: name_x, name_y, assay_ids, values_x, values_y, panels."""
     title: str = "LOD Comparison"
+    unit: str = "NPX"  # "NPX" for Olink, "RFU" for SomaScan
 
 
 @dataclass
@@ -139,6 +141,119 @@ class NormScaleData:
     title: str = "Hybridization Control Normalization Scale"
 
 
+@dataclass
+class OutlierMapData:
+    """SomaScan MAD-based outlier map for heatmap visualization."""
+
+    sample_ids: list[str]
+    analyte_ids: list[str]
+    matrix: list[list[bool]]  # samples × analytes, True = outlier
+    outlier_count_per_sample: list[int]
+    outlier_fraction_per_sample: list[float]
+    fc_crit: float = 5.0
+    title: str = "Outlier Map: |x - median| > 6×MAD & FC > 5×"
+
+
+@dataclass
+class RowCheckData:
+    """SomaScan RowCheck QC summary."""
+
+    n_pass: int
+    n_flag: int
+    flagged_sample_ids: list[str] = field(default_factory=list)
+    norm_scale_values: list[float] = field(default_factory=list)  # for flagged samples
+    title: str = "RowCheck QC Summary"
+
+
+@dataclass
+class ColCheckData:
+    """SomaScan ColCheck QC summary with calibrator QC ratio values."""
+
+    n_pass: int
+    n_flag: int
+    flagged_analyte_ids: list[str] = field(default_factory=list)
+    qc_ratios: list[float] = field(default_factory=list)
+    analyte_ids: list[str] = field(default_factory=list)
+    col_check_flags: list[str] = field(default_factory=list)
+    title: str = "Calibrator QC Ratio"
+
+
+@dataclass
+class ControlAnalyteData:
+    """SomaScan control analyte classification summary."""
+
+    category_counts: dict[str, int]  # e.g. {"HybControlElution": 12, ...}
+    total_controls: int
+    total_analytes: int
+    title: str = "Control Analyte Classification"
+
+
+@dataclass
+class NormScaleBoxplotData:
+    """SomaScan normalization scale factors grouped by a categorical variable."""
+
+    groups: list[str]  # group labels (one per sample)
+    norm_scale_columns: list[str]  # normalization scale column names
+    values: dict[str, list[float]]  # column_name → list of values
+    title: str = "Normalization Scale Factors"
+
+
+@dataclass
+class IqrMedianQcData:
+    """Olink IQR vs Median QC plot data (per sample per panel).
+
+    Mirrors ``olink_qc_plot()`` from OlinkAnalyze.
+    """
+
+    sample_ids: list[str]
+    panels: list[str]
+    iqr_values: list[float]
+    median_values: list[float]
+    is_outlier: list[bool]
+    qc_status: list[str]  # "Pass" or "Warning"
+    # Per-panel thresholds for drawing boundary lines
+    iqr_low: dict[str, float] = field(default_factory=dict)
+    iqr_high: dict[str, float] = field(default_factory=dict)
+    median_low: dict[str, float] = field(default_factory=dict)
+    median_high: dict[str, float] = field(default_factory=dict)
+    n_outlier_samples: int = 0
+    n_total_samples: int = 0
+    title: str = "IQR vs Median QC"
+
+
+@dataclass
+class UniProtDuplicateData:
+    """UniProt duplicate detection summary for Olink datasets."""
+
+    n_affected_assays: int
+    n_total_assays: int
+    duplicates: dict[str, list[str]] = field(default_factory=dict)
+    title: str = "UniProt Duplicate Detection"
+
+
+@dataclass
+class BridgeabilityData:
+    """Cross-product bridgeability diagnostic data for 4-panel plot.
+
+    Mirrors the bridgeability assessment from OlinkAnalyze's
+    ``olink_normalization_bridgeable()``.
+    """
+
+    protein_ids: list[str]
+    range_diffs: list[float]
+    r2_values: list[float]
+    ks_stats: list[float]
+    low_cnts: list[bool]
+    recommendations: list[str]  # "MedianCentering", "QuantileSmoothing", "NotBridgeable"
+    n_bridgeable: int = 0
+    n_not_bridgeable: int = 0
+    n_median_centering: int = 0
+    n_quantile_smoothing: int = 0
+    product1_name: str = "Product 1"
+    product2_name: str = "Product 2"
+    title: str = "Cross-Product Bridgeability Diagnostic"
+
+
 # Keep old name for backwards compat in tests
 QcSummaryData = QcLodSummaryData
 
@@ -159,10 +274,12 @@ def _sample_id_col(dataset: AffinityDataset) -> str:
         if col in dataset.samples.columns:
             if dataset.samples[col].nunique() == len(dataset.samples):
                 return col
-    # SampleID exists but is not unique — try SampleName
+    # SampleID exists but is not unique — try SampleName if fully populated
     if "SampleName" in dataset.samples.columns:
-        return "SampleName"
-    # Last resort: return whichever ID column exists
+        non_empty = dataset.samples["SampleName"].astype(str).str.strip().replace("", pd.NA).dropna()
+        if len(non_empty) == len(dataset.samples):
+            return "SampleName"
+    # Fall back to whichever ID column exists (even if not fully unique)
     for col in ("SampleID", "SampleId"):
         if col in dataset.samples.columns:
             return col
@@ -172,7 +289,8 @@ def _sample_id_col(dataset: AffinityDataset) -> str:
 def _sample_ids(dataset: AffinityDataset) -> list[str]:
     col = _sample_id_col(dataset)
     if col in dataset.samples.columns:
-        return dataset.samples[col].astype(str).tolist()
+        result: list[str] = dataset.samples[col].astype(str).tolist()
+        return result
     return [f"S{i}" for i in range(len(dataset.samples))]
 
 
@@ -223,6 +341,7 @@ def compute_qc_summary(dataset: AffinityDataset) -> QcLodSummaryData | None:
     if lod is not None and (isinstance(lod, pd.DataFrame) or len(lod) > 0):
         above_lod, has_lod = _above_lod_matrix(numeric, lod)
 
+        unit = "RFU" if dataset.platform == Platform.SOMASCAN else "NPX"
         categories: list[str] = []
         counts: list[int] = []
 
@@ -238,10 +357,10 @@ def compute_qc_summary(dataset: AffinityDataset) -> QcLodSummaryData | None:
             below = int(valid_subset.sum().sum()) - above
 
             if above > 0:
-                categories.append(f"{qc_val} & NPX > LOD")
+                categories.append(f"{qc_val} & {unit} > LOD")
                 counts.append(above)
             if below > 0:
-                categories.append(f"{qc_val} & NPX ≤ LOD")
+                categories.append(f"{qc_val} & {unit} ≤ LOD")
                 counts.append(below)
 
         if categories:
@@ -289,7 +408,8 @@ def compute_lod_analysis(dataset: AffinityDataset) -> LodAnalysisData | None:
     if not assay_ids:
         return None
 
-    return LodAnalysisData(assay_ids=assay_ids, above_lod_pct=above_lod_pct, panel=panels)
+    unit = "RFU" if dataset.platform == Platform.SOMASCAN else "NPX"
+    return LodAnalysisData(assay_ids=assay_ids, above_lod_pct=above_lod_pct, panel=panels, unit=unit)
 
 
 def compute_pca(dataset: AffinityDataset, n_components: int = 2) -> PcaData | None:
@@ -454,6 +574,15 @@ def compute_correlation(dataset: AffinityDataset, max_samples: int = 50) -> Corr
     if numeric.shape[0] > max_samples:
         numeric = numeric.sample(n=max_samples, random_state=42)
 
+    # Sort samples by SampleType then PlateID so controls cluster together
+    sort_cols = []
+    for col in ("SampleType", "PlateID", "PlateId"):
+        if col in dataset.samples.columns:
+            sort_cols.append(col)
+    if sort_cols:
+        ordered_idx = dataset.samples.loc[numeric.index].sort_values(sort_cols).index
+        numeric = numeric.loc[ordered_idx]
+
     corr = numeric.T.corr()
 
     id_col = _sample_id_col(dataset)
@@ -517,22 +646,42 @@ def compute_data_completeness(dataset: AffinityDataset) -> DataCompletenessData 
     available (fraction of samples with NPX below LOD), otherwise
     computed from the LOD matrix.
 
+    Control samples (negative controls, plate controls, buffer, calibrator, QC)
+    are excluded so the plot only shows biological samples.
+
     Returns None when no LOD source is available.
     """
+    from pyprideap.processing.filtering import filter_controls
     from pyprideap.processing.lod import _above_lod_matrix
 
-    numeric = dataset.expression.apply(pd.to_numeric, errors="coerce")
-    sample_ids = _sample_ids(dataset)
+    # Filter out control samples — only show biological samples
+    ds = filter_controls(dataset)
+    # For SomaScan, also exclude Buffer/Calibrator/QC (not in _CONTROL_SAMPLE_TYPES)
+    if "SampleType" in ds.samples.columns:
+        st = ds.samples["SampleType"].astype(str).str.strip()
+        non_bio = st.str.lower().isin({"buffer", "calibrator", "qc"})
+        if non_bio.any():
+            keep = ~non_bio
+            ds = AffinityDataset(
+                platform=ds.platform,
+                samples=ds.samples.loc[keep].reset_index(drop=True),
+                features=ds.features,
+                expression=ds.expression.loc[keep].reset_index(drop=True),
+                metadata=ds.metadata,
+            )
+
+    numeric = ds.expression.apply(pd.to_numeric, errors="coerce")
+    sample_ids = _sample_ids(ds)
 
     # Try to get per-protein missing frequency from Olink's MissingFreq column
     # MissingFreq = fraction of samples with NPX below LOD
     olink_missing_freq = None
-    if "MissingFreq" in dataset.features.columns:
-        mf = pd.to_numeric(dataset.features["MissingFreq"], errors="coerce")
+    if "MissingFreq" in ds.features.columns:
+        mf = pd.to_numeric(ds.features["MissingFreq"], errors="coerce")
         if mf.notna().any():
             olink_missing_freq = mf
 
-    # Resolve LOD from all available sources
+    # Resolve LOD from all available sources (use original dataset for negative controls)
     lod = _resolve_lod(dataset)
     has_lod_data = lod is not None and (isinstance(lod, pd.DataFrame) or len(lod) > 0)
 
@@ -558,7 +707,7 @@ def compute_data_completeness(dataset: AffinityDataset) -> DataCompletenessData 
                 above_lod_rate.append(round(n_above / n_valid, 4))
                 below_lod_rate.append(round((n_valid - n_above) / n_valid, 4))
             else:
-                above_lod_rate.append(1.0)
+                above_lod_rate.append(0.0)
                 below_lod_rate.append(0.0)
 
         # Per-protein missing frequency from LOD matrix
@@ -783,7 +932,8 @@ def compute_lod_comparison(dataset: AffinityDataset) -> LodComparisonData | None
     if not pairs:
         return None
 
-    return LodComparisonData(pairs=pairs)
+    unit = "RFU" if dataset.platform == Platform.SOMASCAN else "NPX"
+    return LodComparisonData(pairs=pairs, unit=unit)
 
 
 def compute_volcano(
@@ -837,6 +987,305 @@ def compute_volcano(
     )
 
 
+def compute_outlier_map(
+    dataset: AffinityDataset,
+    *,
+    fc_crit: float = 5.0,
+    max_analytes: int = 500,
+) -> OutlierMapData | None:
+    """Compute MAD-based outlier map for SomaScan QC visualization.
+
+    Equivalent to ``calcOutlierMap()`` in SomaDataIO.  Returns an outlier
+    boolean matrix suitable for heatmap rendering.
+
+    Only applicable to SomaScan datasets.
+    """
+    if dataset.platform != Platform.SOMASCAN:
+        return None
+
+    from pyprideap.processing.somascan.outliers import calc_outlier_map
+
+    omap = calc_outlier_map(dataset, fc_crit=fc_crit)
+
+    # Subsample analytes for visualization if too many
+    mat = omap.matrix
+    if mat.shape[1] > max_analytes:
+        # Keep analytes with most outliers
+        outlier_counts = mat.sum(axis=0)
+        top_cols = outlier_counts.nlargest(max_analytes).index
+        mat = mat[top_cols]
+
+    sample_ids = _sample_ids(dataset)
+    analyte_ids = [str(c) for c in mat.columns]
+
+    return OutlierMapData(
+        sample_ids=sample_ids,
+        analyte_ids=analyte_ids,
+        matrix=[row.tolist() for row in mat.values],
+        outlier_count_per_sample=omap.n_outliers_per_sample.tolist(),
+        outlier_fraction_per_sample=omap.outlier_fraction_per_sample.round(4).tolist(),
+        fc_crit=fc_crit,
+        title=omap.title,
+    )
+
+
+def compute_row_check(dataset: AffinityDataset) -> RowCheckData | None:
+    """Compute RowCheck QC summary for SomaScan data.
+
+    Returns None for non-SomaScan datasets or when no normalization
+    scale columns are present.
+    """
+    if dataset.platform != Platform.SOMASCAN:
+        return None
+
+    from pyprideap.processing.somascan.qc_flags import add_row_check, get_row_check_summary
+
+    ds = add_row_check(dataset)
+    summary = get_row_check_summary(ds)
+
+    flagged_mask = ds.samples["RowCheck"] == "FLAG"
+    sample_ids = _sample_ids(ds)
+    flagged_ids = [sample_ids[i] for i, flagged in enumerate(flagged_mask) if flagged]
+
+    # Get norm scale values for flagged samples
+    norm_vals: list[float] = []
+    if "HybControlNormScale" in ds.samples.columns and flagged_mask.any():
+        vals = pd.to_numeric(ds.samples.loc[flagged_mask, "HybControlNormScale"], errors="coerce")
+        norm_vals = vals.tolist()
+
+    return RowCheckData(
+        n_pass=summary["PASS"],
+        n_flag=summary["FLAG"],
+        flagged_sample_ids=flagged_ids,
+        norm_scale_values=norm_vals,
+    )
+
+
+def compute_col_check(dataset: AffinityDataset) -> ColCheckData | None:
+    """Compute ColCheck QC summary with calibrator QC ratio values for SomaScan data."""
+    if dataset.platform != Platform.SOMASCAN:
+        return None
+    if "ColCheck" not in dataset.features.columns:
+        return None
+
+    from pyprideap.processing.somascan.qc_flags import get_col_check_summary
+
+    summary = get_col_check_summary(dataset)
+
+    id_col = "SeqId" if "SeqId" in dataset.features.columns else dataset.features.columns[0]
+    flagged_ids: list[str] = []
+    if summary["FLAG"] > 0:
+        flag_mask = dataset.features["ColCheck"] == "FLAG"
+        flagged_ids = dataset.features.loc[flag_mask, id_col].astype(str).tolist()
+
+    # Extract CalQcRatio values for the scatter/strip plot
+    qc_ratios: list[float] = []
+    analyte_ids: list[str] = []
+    col_check_flags: list[str] = []
+    ratio_col = None
+    for c in dataset.features.columns:
+        if c.startswith("CalQcRatio"):
+            ratio_col = c
+            break
+
+    if ratio_col is not None:
+        ratios = pd.to_numeric(dataset.features[ratio_col], errors="coerce")
+        ids = dataset.features[id_col].astype(str)
+        flags = dataset.features["ColCheck"].astype(str)
+        valid = ratios.notna()
+        qc_ratios = ratios[valid].round(4).tolist()
+        analyte_ids = ids[valid].tolist()
+        col_check_flags = flags[valid].tolist()
+
+    return ColCheckData(
+        n_pass=summary["PASS"],
+        n_flag=summary["FLAG"],
+        flagged_analyte_ids=flagged_ids,
+        qc_ratios=qc_ratios,
+        analyte_ids=analyte_ids,
+        col_check_flags=col_check_flags,
+    )
+
+
+def compute_control_analytes(dataset: AffinityDataset) -> ControlAnalyteData | None:
+    """Classify and count control analytes in SomaScan data."""
+    if dataset.platform != Platform.SOMASCAN:
+        return None
+
+    from pyprideap.processing.somascan.controls import (
+        CONTROL_ANALYTE_TYPES,
+        classify_control_analytes,
+    )
+
+    classified = classify_control_analytes(dataset)
+    if not classified:
+        return None
+
+    category_counts: dict[str, int] = {}
+    for cat_type in CONTROL_ANALYTE_TYPES:
+        count = sum(1 for v in classified.values() if v == cat_type)
+        if count > 0:
+            category_counts[cat_type.value] = count
+
+    return ControlAnalyteData(
+        category_counts=category_counts,
+        total_controls=len(classified),
+        total_analytes=len(dataset.expression.columns),
+    )
+
+
+def compute_norm_scale_boxplot(
+    dataset: AffinityDataset,
+    group_by: str | None = None,
+) -> NormScaleBoxplotData | None:
+    """Compute normalization scale factors grouped by a variable.
+
+    Equivalent to the ``data.qc`` plots in SomaDataIO's ``preProcessAdat()``.
+    Shows boxplots of all NormScale / Med.Scale.* columns grouped by a
+    categorical variable (e.g. Sex, PlateId).
+
+    Only applicable to SomaScan datasets.
+    """
+    if dataset.platform != Platform.SOMASCAN:
+        return None
+
+    # Find normalization scale columns
+    norm_cols = [c for c in dataset.samples.columns if "normscale" in c.lower() or c.startswith("Med.Scale.")]
+    if not norm_cols:
+        return None
+
+    # Determine grouping variable
+    if group_by and group_by in dataset.samples.columns:
+        groups = dataset.samples[group_by].astype(str).tolist()
+    elif "PlateId" in dataset.samples.columns:
+        groups = dataset.samples["PlateId"].astype(str).tolist()
+    else:
+        groups = ["All"] * len(dataset.samples)
+
+    values: dict[str, list[float]] = {}
+    for col in norm_cols:
+        vals = pd.to_numeric(dataset.samples[col], errors="coerce")
+        values[col] = vals.tolist()
+
+    return NormScaleBoxplotData(
+        groups=groups,
+        norm_scale_columns=norm_cols,
+        values=values,
+    )
+
+
+def compute_iqr_median_qc(
+    dataset: AffinityDataset,
+    *,
+    iqr_outlier_def: float = 3.0,
+    median_outlier_def: float = 3.0,
+) -> IqrMedianQcData | None:
+    """Compute IQR vs Median QC data for Olink datasets.
+
+    Mirrors ``olink_qc_plot()`` from OlinkAnalyze: per panel, computes IQR
+    and median NPX per sample, then flags samples outside ±n SD.
+
+    Returns None for SomaScan datasets or when Panel column is absent.
+    """
+    if dataset.platform == Platform.SOMASCAN:
+        return None
+
+    from pyprideap.processing.olink.outliers import compute_iqr_median_outliers
+
+    result = compute_iqr_median_outliers(
+        dataset,
+        iqr_outlier_def=iqr_outlier_def,
+        median_outlier_def=median_outlier_def,
+    )
+
+    return IqrMedianQcData(
+        sample_ids=result.sample_ids,
+        panels=result.panels,
+        iqr_values=result.iqr_values,
+        median_values=result.median_values,
+        is_outlier=result.is_outlier,
+        qc_status=result.qc_status,
+        iqr_low=result.iqr_low,
+        iqr_high=result.iqr_high,
+        median_low=result.median_low,
+        median_high=result.median_high,
+        n_outlier_samples=len(result.outlier_sample_ids),
+        n_total_samples=result.n_samples,
+    )
+
+
+def compute_uniprot_duplicates(dataset: AffinityDataset) -> UniProtDuplicateData | None:
+    """Detect UniProt duplicate mappings in Olink datasets.
+
+    Mirrors ``npx_check_uniprot_dups.R`` from OlinkAnalyze.
+    Returns None for SomaScan datasets or when required columns are absent.
+    """
+    if dataset.platform == Platform.SOMASCAN:
+        return None
+    if "OlinkID" not in dataset.features.columns or "UniProt" not in dataset.features.columns:
+        return None
+
+    from pyprideap.processing.olink.uniprot import detect_uniprot_duplicates
+
+    info = detect_uniprot_duplicates(dataset)
+
+    return UniProtDuplicateData(
+        n_affected_assays=info.n_affected_assays,
+        n_total_assays=info.n_total_assays,
+        duplicates=info.duplicates,
+    )
+
+
+def compute_bridgeability(
+    dataset1: AffinityDataset,
+    dataset2: AffinityDataset,
+    *,
+    iqr_multiplier: float = 3.0,
+    product1_name: str | None = None,
+    product2_name: str | None = None,
+) -> BridgeabilityData | None:
+    """Compute cross-product bridgeability diagnostics for visualization.
+
+    Wraps ``assess_cross_product_bridgeability`` and packages the result
+    into a :class:`BridgeabilityData` suitable for the 4-panel plot.
+
+    Returns None if there are no overlapping proteins.
+    """
+    from pyprideap.processing.normalization import assess_cross_product_bridgeability
+
+    try:
+        df = assess_cross_product_bridgeability(
+            dataset1,
+            dataset2,
+            iqr_multiplier=iqr_multiplier,
+        )
+    except ValueError:
+        return None
+
+    if df.empty:
+        return None
+
+    name1 = product1_name or str(getattr(dataset1.platform, "value", "Product 1"))
+    name2 = product2_name or str(getattr(dataset2.platform, "value", "Product 2"))
+
+    recs = df["bridging_recommendation"].value_counts()
+
+    return BridgeabilityData(
+        protein_ids=df["protein_id"].tolist(),
+        range_diffs=df["range_diff"].tolist(),
+        r2_values=df["r2"].tolist(),
+        ks_stats=df["ks_stat"].tolist(),
+        low_cnts=df["low_cnt"].tolist(),
+        recommendations=df["bridging_recommendation"].tolist(),
+        n_bridgeable=int((df["is_bridgeable"]).sum()),
+        n_not_bridgeable=int(recs.get("NotBridgeable", 0)),
+        n_median_centering=int(recs.get("MedianCentering", 0)),
+        n_quantile_smoothing=int(recs.get("QuantileSmoothing", 0)),
+        product1_name=name1,
+        product2_name=name2,
+    )
+
+
 def compute_all(dataset: AffinityDataset) -> dict[str, object]:
     """Compute all applicable QC plot data for the dataset."""
     results: dict[str, object] = {}
@@ -852,4 +1301,18 @@ def compute_all(dataset: AffinityDataset) -> dict[str, object]:
     results["plate_cv"] = compute_plate_cv(dataset)
     results["norm_scale"] = compute_norm_scale(dataset)
     results["lod_comparison"] = compute_lod_comparison(dataset)
+
+    # SomaScan-specific QC
+    if dataset.platform == Platform.SOMASCAN:
+        results["outlier_map"] = compute_outlier_map(dataset)
+        results["row_check"] = compute_row_check(dataset)
+        results["col_check"] = compute_col_check(dataset)
+        results["control_analytes"] = compute_control_analytes(dataset)
+        results["norm_scale_boxplot"] = compute_norm_scale_boxplot(dataset)
+
+    # Olink-specific QC
+    if dataset.platform != Platform.SOMASCAN:
+        results["iqr_median_qc"] = compute_iqr_median_qc(dataset)
+        results["uniprot_duplicates"] = compute_uniprot_duplicates(dataset)
+
     return {k: v for k, v in results.items() if v is not None}
