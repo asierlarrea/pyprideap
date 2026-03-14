@@ -74,11 +74,13 @@ def bridge_normalize(
                 ids = ds.samples[col].astype(str)
                 mask = ids.isin(bridge)
                 if mask.any():
-                    return pd.Index(ds.samples.index[mask])
+                    result: pd.Index = pd.Index(ds.samples.index[mask])
+                    return result
         # Fallback: try matching against the expression index directly
         idx_match = ds.expression.index.isin(bridge)
         if idx_match.any():
-            return pd.Index(ds.expression.index[idx_match])
+            fallback: pd.Index = pd.Index(ds.expression.index[idx_match])
+            return fallback
         return pd.Index([])
 
     ds1_bridge_idx = _resolve_bridge_mask(dataset1, bridge_samples)

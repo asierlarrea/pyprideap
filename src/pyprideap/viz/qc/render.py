@@ -1069,8 +1069,6 @@ def render_col_check(data: ColCheckData) -> Figure:
     go, _ = _import_plotly()
 
     if data.qc_ratios:
-        # Strip plot of QC ratios, coloured by PASS/FLAG
-        colors = ["#2ecc71" if f == "PASS" else "#e74c3c" for f in data.col_check_flags]
         fig = go.Figure()
         # PASS points
         pass_idx = [i for i, f in enumerate(data.col_check_flags) if f == "PASS"]

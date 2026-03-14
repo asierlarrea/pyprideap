@@ -9,7 +9,6 @@ import numpy as np
 from pyprideap.core import AffinityDataset
 from pyprideap.viz.qc.compute import (
     ColCheckData,
-    ControlAnalyteData,
     CorrelationData,
     CvDistributionData,
     DataCompletenessData,
@@ -18,13 +17,10 @@ from pyprideap.viz.qc.compute import (
     IqrMedianQcData,
     LodAnalysisData,
     LodComparisonData,
-    NormScaleBoxplotData,
     NormScaleData,
-    OutlierMapData,
     PcaData,
     PlateCvData,
     QcLodSummaryData,
-    RowCheckData,
     UmapData,
     UniProtDuplicateData,
     compute_all,
