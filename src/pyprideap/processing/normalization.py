@@ -65,6 +65,7 @@ def bridge_normalize(
         If no bridge samples are found in both datasets or there are no
         overlapping proteins.
     """
+
     # Resolve bridge samples by sample ID column (not DataFrame index),
     # since select_bridge_samples returns SampleID/SampleName strings.
     def _resolve_bridge_mask(ds: AffinityDataset, bridge: list[str]) -> pd.Index:
