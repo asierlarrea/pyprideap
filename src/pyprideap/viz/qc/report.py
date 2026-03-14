@@ -23,7 +23,9 @@ from pyprideap.viz.qc.compute import (
     QcLodSummaryData,
     UmapData,
     UniProtDuplicateData,
+    VolcanoData,
     compute_all,
+    compute_volcano,
 )
 
 _HELP_TEXT: dict[str, str] = {
@@ -185,6 +187,15 @@ _HELP_TEXT: dict[str, str] = {
         "For downstream pathway or gene-set enrichment analyses, be aware that duplicated proteins "
         "may inflate counts unless handled (e.g. by averaging or selecting the best-performing assay)."
     ),
+    "differential_expression": (
+        "Volcano plots showing differentially expressed proteins between sample groups defined "
+        "in the SDRF metadata file. Each dot is a protein; the x-axis shows fold change "
+        "(log2 scale for Olink, log2-RFU for SomaScan) and the y-axis shows statistical "
+        "significance (-log10 adjusted p-value). Coloured dots are significant (|FC| &ge; 1 "
+        "and adj. p &lt; 0.05). Use the <strong>dropdown</strong> to switch between different "
+        "characteristics or factor values. For variables with exactly 2 groups a Welch t-test "
+        "is used; for variables with 3-10 groups every pairwise comparison is shown."
+    ),
 }
 
 _SECTION_ORDER = [
@@ -196,6 +207,7 @@ _SECTION_ORDER = [
     ("Variability", ["cv_distribution", "plate_cv"]),
     ("Olink QC", ["iqr_median_qc", "uniprot_duplicates"]),
     ("SomaScan QC", ["col_check"]),
+    ("Differential Expression", ["differential_expression"]),
 ]
 
 _CSS = """\
@@ -403,6 +415,16 @@ body.pride-embedded footer { display: none; }
 body.pride-embedded .main-content { max-width: none; padding: 8px; }
 body.pride-embedded .plot-card { border-color: #e8eaec; box-shadow: none; }
 body.pride-embedded .pride-embedded-empty { display: block; }
+.volcano-controls { margin: 12px 0; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.volcano-controls select {
+    padding: 6px 10px; border: 1px solid var(--border); border-radius: 6px;
+    font-size: 0.92em; background: var(--card);
+}
+.volcano-comp-select { margin: 4px 0 8px 0; }
+.volcano-comp-select select {
+    padding: 5px 8px; border: 1px solid var(--border); border-radius: 6px;
+    font-size: 0.88em; background: var(--card);
+}
 """
 
 _JS = """\
@@ -505,6 +527,43 @@ document.addEventListener('DOMContentLoaded', function() {
         window.addEventListener('resize', notifyHeight);
     }
 });
+
+// Volcano plot variable / comparison switching
+function switchVolcanoVar(varName) {
+    // Hide all volcano plots and comparison selectors
+    document.querySelectorAll('.volcano-plot').forEach(function(el) {
+        el.style.display = 'none';
+    });
+    document.querySelectorAll('.volcano-comp-select').forEach(function(el) {
+        el.style.display = 'none';
+    });
+    // Show first comparison for selected variable
+    var plots = document.querySelectorAll('.volcano-plot[data-var="' + varName + '"]');
+    if (plots.length > 0) {
+        plots[0].style.display = '';
+        // Trigger Plotly resize for the newly visible plot
+        var plotDiv = plots[0].querySelector('.plotly-graph-div');
+        if (plotDiv && window.Plotly) { window.Plotly.Plots.resize(plotDiv); }
+    }
+    // Show comparison selector if multiple comparisons
+    var compSel = document.querySelector('.volcano-comp-select[data-var="' + varName + '"]');
+    if (compSel) {
+        compSel.style.display = '';
+        // Reset to first option
+        var sel = compSel.querySelector('select');
+        if (sel) sel.value = '0';
+    }
+}
+
+function switchVolcanoComp(varName, compIdx) {
+    document.querySelectorAll('.volcano-plot[data-var="' + varName + '"]').forEach(function(el) {
+        el.style.display = (el.getAttribute('data-comp') === compIdx) ? '' : 'none';
+        if (el.getAttribute('data-comp') === compIdx) {
+            var plotDiv = el.querySelector('.plotly-graph-div');
+            if (plotDiv && window.Plotly) { window.Plotly.Plots.resize(plotDiv); }
+        }
+    });
+}
 """
 
 
@@ -1076,8 +1135,101 @@ def _render_summary_table(
     )
 
 
-def qc_report(dataset: AffinityDataset, output: str | Path) -> Path:
-    """Generate a complete QC HTML report for the dataset."""
+def _compute_sdrf_volcanoes(
+    dataset: AffinityDataset,
+    sdrf_path: str | Path,
+) -> dict[str, list[tuple[str, VolcanoData]]]:
+    """Compute volcano plot data for each suitable SDRF grouping variable.
+
+    Returns a dict mapping variable name to a list of
+    ``(comparison_label, VolcanoData)`` tuples.
+    """
+    from dataclasses import replace as ds_replace
+
+    from pyprideap.io.readers.sdrf import get_grouping_columns, merge_sdrf, read_sdrf
+    from pyprideap.stats.differential import ttest
+
+    sdrf = read_sdrf(sdrf_path)
+    ds = merge_sdrf(dataset, sdrf)
+    grouping_cols = get_grouping_columns(sdrf)
+
+    results: dict[str, list[tuple[str, VolcanoData]]] = {}
+
+    for col in grouping_cols:
+        if col not in ds.samples.columns:
+            continue
+
+        # Clean out "not available" / "not applicable" values
+        valid_mask = ~ds.samples[col].astype(str).str.strip().str.lower().isin(
+            {"not available", "not applicable", "nan", "", "na"}
+        )
+        ds_clean = ds_replace(
+            ds,
+            samples=ds.samples[valid_mask].reset_index(drop=True),
+            expression=ds.expression[valid_mask].reset_index(drop=True),
+        )
+
+        groups = ds_clean.samples[col].dropna().unique()
+        n_groups = len(groups)
+
+        comparisons: list[tuple[str, VolcanoData]] = []
+
+        if n_groups == 2:
+            # Direct two-group comparison
+            try:
+                test_df = ttest(ds_clean, group_var=col)
+                label = f"{groups[0]} vs {groups[1]}"
+                vdata = compute_volcano(test_df)
+                if vdata is not None:
+                    vdata.title = f"{col}: {label}"
+                    comparisons.append((label, vdata))
+            except (ValueError, Exception):
+                pass
+        elif 2 < n_groups <= 10:
+            # Pairwise comparisons
+            sorted_groups = sorted(groups)
+            for i, g1 in enumerate(sorted_groups):
+                for g2 in sorted_groups[i + 1 :]:
+                    pair_mask = ds_clean.samples[col].isin({g1, g2})
+                    ds_pair = ds_replace(
+                        ds_clean,
+                        samples=ds_clean.samples[pair_mask].reset_index(drop=True),
+                        expression=ds_clean.expression[pair_mask].reset_index(drop=True),
+                    )
+                    try:
+                        test_df = ttest(ds_pair, group_var=col)
+                        label = f"{g1} vs {g2}"
+                        vdata = compute_volcano(test_df)
+                        if vdata is not None:
+                            vdata.title = f"{col}: {label}"
+                            comparisons.append((label, vdata))
+                    except (ValueError, Exception):
+                        pass
+
+        if comparisons:
+            results[col] = comparisons
+
+    return results
+
+
+def qc_report(
+    dataset: AffinityDataset,
+    output: str | Path,
+    sdrf_path: str | Path | None = None,
+) -> Path:
+    """Generate a complete QC HTML report for the dataset.
+
+    Parameters
+    ----------
+    dataset : AffinityDataset
+        The dataset to report on.
+    output : str | Path
+        Output HTML file path.
+    sdrf_path : str | Path | None
+        Optional path to an SDRF TSV file.  When provided, differential
+        expression volcano plots are added to the report with an
+        interactive dropdown to select the grouping variable.
+    """
     try:
         import plotly  # noqa: F401
     except ImportError:
@@ -1198,6 +1350,73 @@ def qc_report(dataset: AffinityDataset, output: str | Path) -> Path:
         js = "cdn" if key == first_key else False
         plot_html = fig.to_html(full_html=False, include_plotlyjs=js, default_height=plot_height)
         rendered[key] = (data.title, plot_html)  # type: ignore[attr-defined]
+
+    # SDRF-driven differential expression volcano plots
+    if sdrf_path is not None:
+        try:
+            volcano_results = _compute_sdrf_volcanoes(dataset, sdrf_path)
+        except Exception:
+            volcano_results = {}
+
+        if volcano_results:
+            volcano_html_parts: list[str] = []
+            # Build dropdown options
+            var_names = list(volcano_results.keys())
+            options_html = "".join(
+                f'<option value="{html_mod.escape(v)}">{html_mod.escape(v)}</option>' for v in var_names
+            )
+            dropdown_html = (
+                '<div class="volcano-controls">'
+                '<label for="volcano-var-select"><strong>Grouping variable:</strong></label> '
+                '<select id="volcano-var-select" onchange="switchVolcanoVar(this.value)">'
+                f"{options_html}"
+                "</select>"
+                ' <span id="volcano-comparison-label" style="margin-left:12px;color:#666;"></span>'
+                "</div>"
+            )
+            volcano_html_parts.append(dropdown_html)
+
+            # Render all volcano plots (hidden by default, JS toggles visibility)
+            need_plotly = first_key is None  # only include CDN if not already included
+            for var_idx, (var_name, comparisons) in enumerate(volcano_results.items()):
+                # Comparison sub-dropdown for multi-comparison variables
+                if len(comparisons) > 1:
+                    comp_options = "".join(
+                        f'<option value="{i}">{html_mod.escape(label)}</option>'
+                        for i, (label, _) in enumerate(comparisons)
+                    )
+                    comp_select = (
+                        f'<div class="volcano-comp-select" data-var="{html_mod.escape(var_name)}"'
+                        f' style="display:none;margin:8px 0;">'
+                        f"<label><strong>Comparison:</strong></label> "
+                        f"<select onchange=\"switchVolcanoComp('{html_mod.escape(var_name)}', this.value)\">"
+                        f"{comp_options}"
+                        f"</select></div>"
+                    )
+                    volcano_html_parts.append(comp_select)
+
+                for comp_idx, (label, vdata) in enumerate(comparisons):
+                    fig = R.render_volcano(vdata)
+                    fig.update_layout(height=500)
+                    _compact_fig(fig)
+                    js_include: Any = False
+                    if need_plotly:
+                        js_include = "cdn"
+                        need_plotly = False
+                    fig_html = fig.to_html(full_html=False, include_plotlyjs=js_include, default_height="500px")
+                    visible = var_idx == 0 and comp_idx == 0
+                    display = "" if visible else ' style="display:none"'
+                    volcano_html_parts.append(
+                        f'<div class="volcano-plot" '
+                        f'data-var="{html_mod.escape(var_name)}" '
+                        f'data-comp="{comp_idx}"'
+                        f"{display}>{fig_html}</div>"
+                    )
+
+            rendered["differential_expression"] = (
+                "Differential Expression",
+                "".join(volcano_html_parts),
+            )
 
     # LOD source summary card (computed early for use in summary table)
     lod_info = _lod_source_info(dataset)

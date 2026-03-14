@@ -67,6 +67,7 @@ def _generate_report(
     output_path: Path | None,
     platform: str | None = None,
     split: bool = False,
+    sdrf_path: Path | None = None,
 ) -> Path:
     """Read a data file and generate a QC report."""
     import pyprideap as pp
@@ -97,8 +98,11 @@ def _generate_report(
             stem = Path(stem).stem
         output_path = Path(f"{stem}_qc_report.html")
 
+    if sdrf_path is not None:
+        print(f"  SDRF: {sdrf_path.name}")
+
     print("Generating report...")
-    result = pp.qc_report(ds, output_path)
+    result = pp.qc_report(ds, output_path, sdrf_path=sdrf_path)
     print(f"  Report saved to {result}")
     return result
 
@@ -109,6 +113,7 @@ def cmd_report(args: argparse.Namespace) -> None:
     output = Path(args.output) if args.output else None
     platform = args.platform
     split = args.split
+    sdrf_path = Path(args.sdrf) if args.sdrf else None
 
     # Check if input looks like a PAD accession
     if input_val.upper().startswith("PAD") and not Path(input_val).exists():
@@ -130,7 +135,7 @@ def cmd_report(args: argparse.Namespace) -> None:
                             out = Path(f"{accession}_{stem}_qc_plots")
                         else:
                             out = Path(f"{accession}_{stem}_qc_report.html")
-                    _generate_report(f, out, platform=platform, split=split)
+                    _generate_report(f, out, platform=platform, split=split, sdrf_path=sdrf_path)
                 except Exception as e:
                     print(f"  Skipping {f.name}: {e}", file=sys.stderr)
     else:
@@ -138,7 +143,7 @@ def cmd_report(args: argparse.Namespace) -> None:
         if not input_path.exists():
             print(f"Error: File not found: {input_path}", file=sys.stderr)
             sys.exit(1)
-        _generate_report(input_path, output, platform=platform, split=split)
+        _generate_report(input_path, output, platform=platform, split=split, sdrf_path=sdrf_path)
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -174,6 +179,11 @@ def main(argv: list[str] | None = None) -> None:
         action="store_true",
         default=False,
         help="Output individual plot HTML files in a folder instead of a single report",
+    )
+    report_parser.add_argument(
+        "--sdrf",
+        default=None,
+        help="Path to SDRF TSV file for differential expression volcano plots",
     )
 
     # proteins-above-lod subcommand
