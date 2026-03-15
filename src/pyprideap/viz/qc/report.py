@@ -8,7 +8,6 @@ from typing import Any
 import numpy as np
 
 from pyprideap.core import AffinityDataset
-
 from pyprideap.viz.qc.compute import (
     ColCheckData,
     CorrelationData,

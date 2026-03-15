@@ -7,13 +7,13 @@ import pandas as pd
 import pyarrow.parquet as pq
 
 from pyprideap.core import AffinityDataset
-
-logger = logging.getLogger(__name__)
 from pyprideap.io.readers.olink_csv import read_olink_csv
 from pyprideap.io.readers.olink_parquet import read_olink_parquet
 from pyprideap.io.readers.olink_xlsx import read_olink_xlsx
 from pyprideap.io.readers.somascan_adat import read_somascan_adat
 from pyprideap.io.readers.somascan_csv import read_somascan_csv
+
+logger = logging.getLogger(__name__)
 
 _OLINK_MARKER_COLS = {"OlinkID", "NPX", "SampleID"}
 _SOMASCAN_MARKER_COLS = {"SeqId", "SomaId"}
