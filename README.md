@@ -1,5 +1,11 @@
 # pyprideap
 
+[![PyPI version](https://img.shields.io/pypi/v/pyprideap.svg)](https://pypi.org/project/pyprideap/)
+[![Python](https://img.shields.io/pypi/pyversions/pyprideap.svg)](https://pypi.org/project/pyprideap/)
+[![CI](https://github.com/PRIDE-Archive/pyprideap/actions/workflows/ci.yml/badge.svg)](https://github.com/PRIDE-Archive/pyprideap/actions/workflows/ci.yml)
+[![License](https://img.shields.io/github/license/PRIDE-Archive/pyprideap.svg)](https://github.com/PRIDE-Archive/pyprideap/blob/main/LICENSE)
+[![Downloads](https://img.shields.io/pypi/dm/pyprideap.svg)](https://pypi.org/project/pyprideap/)
+
 Python PRIDE Affinity Proteomics (pyprideap), a library for reading, validating, and analyzing affinity proteomics datasets from the [PRIDE Affinity Archive (PAD)](https://www.ebi.ac.uk/pride/).
 
 Supports **Olink** (Explore, Explore HT, Target, Reveal) and **SomaScan** platforms.
