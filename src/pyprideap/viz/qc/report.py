@@ -1644,9 +1644,9 @@ def qc_report_split(dataset: AffinityDataset, output_dir: str | Path) -> Path:
                 '<label class="toggle-switch">'
                 '<input type="checkbox" id="dimred-switch" onchange="toggleDimRed(this)">'
                 '<span class="toggle-slider"></span>'
-                '</label>'
+                "</label>"
                 f'<span class="dimred-label" id="dimred-lbl-tsne">{nl_method}</span>'
-                '</div>'
+                "</div>"
             )
         else:
             toggle_html = ""
@@ -1656,9 +1656,9 @@ def qc_report_split(dataset: AffinityDataset, output_dir: str | Path) -> Path:
         help_text = _HELP_TEXT.get("dimreduction", "")
         body = (
             f'<div class="plot-card"><div class="plot-header">'
-            f'<h3>Dimensionality Reduction</h3>{toggle_html}</div>'
+            f"<h3>Dimensionality Reduction</h3>{toggle_html}</div>"
             f'<div class="help-text open">{help_text}</div>'
-            f'{combined_html}</div>'
+            f"{combined_html}</div>"
         )
         page = _wrap_standalone_html(f"Dimensionality Reduction — {platform_label}", body)
         (output_dir / "dimreduction.html").write_text(page)
