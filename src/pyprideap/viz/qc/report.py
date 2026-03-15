@@ -1610,30 +1610,59 @@ def qc_report_split(dataset: AffinityDataset, output_dir: str | Path) -> Path:
         (output_dir / f"{key}.html").write_text(page)
         written.append(key)
 
-    # PCA and t-SNE as separate files
+    # Combined PCA + t-SNE with toggle switch (matches full report)
     _pca_raw = plot_data.get("pca")
     _umap_raw = plot_data.get("umap")
     pca_data: PcaData | None = _pca_raw if isinstance(_pca_raw, PcaData) else None
     umap_data: UmapData | None = _umap_raw if isinstance(_umap_raw, UmapData) else None
+    has_dimred = pca_data is not None or umap_data is not None
 
-    if pca_data is not None:
-        fig = R.render_pca(pca_data)
-        fig.update_layout(height=500)
-        plot_html = fig.to_html(full_html=False, include_plotlyjs=False, default_height="500px")
-        body = f'<div class="plot-card"><div class="plot-header"><h3>PCA</h3></div>{plot_html}</div>'
-        page = _wrap_standalone_html(f"PCA — {platform_label}", body)
-        (output_dir / "pca.html").write_text(page)
-        written.append("pca")
+    if has_dimred:
+        dimred_parts: list[str] = []
 
-    if umap_data is not None:
-        nl_method = umap_data.title if hasattr(umap_data, "title") else "t-SNE"
-        fig = R.render_tsne(umap_data)
-        fig.update_layout(height=500)
-        plot_html = fig.to_html(full_html=False, include_plotlyjs=False, default_height="500px")
-        body = f'<div class="plot-card"><div class="plot-header"><h3>{nl_method}</h3></div>{plot_html}</div>'
-        page = _wrap_standalone_html(f"{nl_method} — {platform_label}", body)
-        (output_dir / "tsne.html").write_text(page)
-        written.append("tsne")
+        if pca_data is not None:
+            pca_fig = R.render_pca(pca_data)
+            pca_fig.update_layout(height=500)
+            pca_html = pca_fig.to_html(full_html=False, include_plotlyjs=False, default_height="500px")
+            dimred_parts.append(f'<div class="dimred-panel" id="dimred-pca">{pca_html}</div>')
+
+        if umap_data is not None:
+            tsne_fig = R.render_tsne(umap_data)
+            tsne_fig.update_layout(height=500)
+            tsne_html = tsne_fig.to_html(full_html=False, include_plotlyjs=False, default_height="500px")
+            hidden = ' style="display:none"' if pca_data is not None else ""
+            dimred_parts.append(f'<div class="dimred-panel" id="dimred-tsne"{hidden}>{tsne_html}</div>')
+
+        nl_method = umap_data.title if umap_data is not None else "t-SNE"
+        combined_html = "".join(dimred_parts)
+
+        # Build toggle switch only if both methods available
+        if pca_data is not None and umap_data is not None:
+            toggle_html = (
+                '<div class="dimred-toggle">'
+                '<span class="dimred-label dimred-label-active" id="dimred-lbl-pca">PCA</span>'
+                '<label class="toggle-switch">'
+                '<input type="checkbox" id="dimred-switch" onchange="toggleDimRed(this)">'
+                '<span class="toggle-slider"></span>'
+                '</label>'
+                f'<span class="dimred-label" id="dimred-lbl-tsne">{nl_method}</span>'
+                '</div>'
+            )
+        else:
+            toggle_html = ""
+
+        toggle_html += '<button class="label-toggle-btn" onclick="toggleDimRedLabels(this)">Show Labels</button>'
+
+        help_text = _HELP_TEXT.get("dimreduction", "")
+        body = (
+            f'<div class="plot-card"><div class="plot-header">'
+            f'<h3>Dimensionality Reduction</h3>{toggle_html}</div>'
+            f'<div class="help-text open">{help_text}</div>'
+            f'{combined_html}</div>'
+        )
+        page = _wrap_standalone_html(f"Dimensionality Reduction — {platform_label}", body)
+        (output_dir / "dimreduction.html").write_text(page)
+        written.append("dimreduction")
 
     # LOD sources card
     lod_card_html = _render_lod_card(lod_info)
