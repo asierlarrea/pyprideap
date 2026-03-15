@@ -1521,7 +1521,7 @@ def qc_report(
 
 def _wrap_standalone_html(title: str, body: str, include_plotlyjs: bool = True) -> str:
     """Wrap plot HTML in a standalone page with PRIDE styling."""
-    plotly_cdn = '<script src="https://cdn.plot.ly/plotly-latest.min.js"></script>\n' if include_plotlyjs else ""
+    plotly_cdn = '<script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>\n' if include_plotlyjs else ""
     return (
         f'<!DOCTYPE html>\n<html lang="en">\n<head>\n'
         f'    <meta charset="utf-8">\n'
