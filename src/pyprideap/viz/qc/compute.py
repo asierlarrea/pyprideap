@@ -110,6 +110,7 @@ class VolcanoData:
     significant: list[bool]
     direction: list[str]  # "up", "down", "ns"
     title: str = "Volcano Plot"
+    method: str = ""  # e.g. "Welch t-test", "Linear model (adjusted for age, sex)"
 
 
 @dataclass

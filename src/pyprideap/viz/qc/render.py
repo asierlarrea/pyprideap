@@ -1525,6 +1525,24 @@ def render_volcano(data: VolcanoData) -> Figure:
         )
 
     set_plot_theme(fig)
+
+    # Add method annotation if available
+    annotations = []
+    if data.method:
+        annotations.append(
+            dict(
+                text=f"Method: {data.method}",
+                xref="paper",
+                yref="paper",
+                x=0.0,
+                y=1.02,
+                xanchor="left",
+                yanchor="bottom",
+                showarrow=False,
+                font=dict(size=11, color=PRIDE_COLORS["text_muted"]),
+            )
+        )
+
     fig.update_layout(
         title=dict(text=data.title, x=0.5, xanchor="center"),
         xaxis_title="Fold Change",
@@ -1544,6 +1562,7 @@ def render_volcano(data: VolcanoData) -> Figure:
             x=0.5,
         ),
         margin=dict(l=60, r=30, t=60, b=80),
+        annotations=annotations,
     )
     return fig
 
