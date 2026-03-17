@@ -628,6 +628,7 @@ def compute_correlation(dataset: AffinityDataset, max_samples: int = 50) -> Corr
         dist = dist.fillna(1.0)
 
         # Ensure symmetry and zero diagonal for squareform
+        dist = dist.copy()
         np.fill_diagonal(dist.values, 0.0)
         dist = (dist + dist.T) / 2.0
 
