@@ -1419,11 +1419,7 @@ def render_uniprot_duplicates(data: UniProtDuplicateData) -> Figure:
         marker_color="#2ecc71",
         text=[f"{pct_unique:.1f}%"],
         textposition="inside",
-        hovertemplate=(
-            "Unique proteins:<br>"
-            f"{n_unique} / {n_total} assays<br>"
-            "%{y:.1f}% of assays<extra></extra>"
-        ),
+        hovertemplate=(f"Unique proteins:<br>{n_unique} / {n_total} assays<br>%{{y:.1f}}% of assays<extra></extra>"),
     )
     fig.add_bar(
         x=["Assays"],
@@ -1440,10 +1436,7 @@ def render_uniprot_duplicates(data: UniProtDuplicateData) -> Figure:
     )
 
     fig.update_layout(
-        title=(
-            f"{data.title} — {n_unique} unique proteins, {n_total} assays "
-            f"({n_replicate} replicate assays)"
-        ),
+        title=(f"{data.title} — {n_unique} unique proteins, {n_total} assays ({n_replicate} replicate assays)"),
         barmode="stack",
         yaxis_title="% of Assays",
         yaxis=dict(range=[0, 100], ticksuffix="%"),

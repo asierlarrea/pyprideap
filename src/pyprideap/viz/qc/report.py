@@ -649,9 +649,7 @@ def _lod_source_info(dataset: AffinityDataset) -> dict[str, Any]:
             if info["active"] is None:
                 info["active"] = "Reported LOD"
         else:
-            sources.append(
-                {"name": "Reported LOD", "status": "unavailable", "detail": "No LOD column in data file"}
-            )
+            sources.append({"name": "Reported LOD", "status": "unavailable", "detail": "No LOD column in data file"})
 
         # 2. NCLOD from negative controls
         try:
