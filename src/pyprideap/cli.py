@@ -178,7 +178,7 @@ def report(
         click.echo("Error: Provide either an input file or --accession, not both.", err=True)
         sys.exit(1)
 
-    output_path = Path(output) if output else None
+    output_path = Path(output) if output else '.'
     sdrf_path = Path(sdrf) if sdrf else None
 
     if accession is not None:
@@ -191,15 +191,13 @@ def report(
 
             for f in files:
                 try:
-                    out = output_path if output_path and len(files) == 1 else None
-                    if out is None:
-                        stem = f.stem
-                        if stem.endswith(".npx") or stem.endswith(".ct"):
-                            stem = Path(stem).stem
-                        if split:
-                            out = Path(f"{accession}_{stem}_qc_plots")
-                        else:
-                            out = Path(f"{accession}_{stem}_qc_report.html")
+                    stem = f.stem
+                    if stem.endswith(".npx") or stem.endswith(".ct"):
+                        stem = Path(stem).stem
+                    if split:
+                        out = Path(f"{output_path}/{stem}")
+                    else:
+                        out = Path(f"{output_path}/{stem}.html")
                     _generate_report(f, out, platform=platform, split=split, sdrf_path=sdrf_path)
                 except Exception as e:
                     logger.debug("Error processing %s: %s", f.name, e, exc_info=True)
