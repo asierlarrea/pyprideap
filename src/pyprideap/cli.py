@@ -91,6 +91,7 @@ def _generate_report(
         platform: str | None = None,
         split: bool = False,
         sdrf_path: Path | None = None,
+        no_border: bool = False,
 ) -> Path:
     """Read a data file and generate a QC report."""
     import pyprideap as pp
@@ -113,7 +114,7 @@ def _generate_report(
 
         click.echo("Generating individual plot files...")
         logger.debug("Output directory: %s", output_path)
-        result = qc_report_split(ds, output_path)
+        result = qc_report_split(ds, output_path, no_border=no_border)
         n_files = len(list(result.glob("*.html")))
         click.echo(f"  {n_files} HTML files saved to {result}/")
         return result
@@ -157,6 +158,7 @@ def main() -> None:
     "--split", is_flag=True, default=False, help="Output individual plot HTML files instead of a single report."
 )
 @click.option("--sdrf", default=None, type=click.Path(exists=True), help="Path to SDRF TSV file for volcano plots.")
+@click.option("--no-border", is_flag=True, default=False, help="Remove card borders from split plot files.")
 @click.option("-v", "--verbose", is_flag=True, default=False, help="Enable verbose logging output.")
 def report(
         input_file: str | None,
@@ -165,6 +167,7 @@ def report(
         platform: str | None,
         split: bool,
         sdrf: str | None,
+        no_border: bool,
         verbose: bool,
 ) -> None:
     """Generate a QC report from a data file or PAD accession."""
@@ -198,7 +201,7 @@ def report(
                         out = Path(f"{output_path}/{stem}")
                     else:
                         out = Path(f"{output_path}/{stem}.html")
-                    _generate_report(f, out, platform=platform, split=split, sdrf_path=sdrf_path)
+                    _generate_report(f, out, platform=platform, split=split, sdrf_path=sdrf_path, no_border=no_border)
                 except Exception as e:
                     logger.debug("Error processing %s: %s", f.name, e, exc_info=True)
                     click.echo(f"  Skipping {f.name}: {e}", err=True)
@@ -207,7 +210,7 @@ def report(
         if not input_path.exists():
             click.echo(f"Error: File not found: {input_path}", err=True)
             sys.exit(1)
-        _generate_report(input_path, output_path, platform=platform, split=split, sdrf_path=sdrf_path)
+        _generate_report(input_path, output_path, platform=platform, split=split, sdrf_path=sdrf_path, no_border=no_border)
 
 
 @main.command("proteins-above-lod")
