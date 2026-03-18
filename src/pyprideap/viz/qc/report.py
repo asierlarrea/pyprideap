@@ -1572,8 +1572,8 @@ def qc_report(
                 f'<div class="plot-card" id="{key}">'
                 f'<div class="plot-header">'
                 f"<h3>{title}</h3>"
-                f"{extra_header}"
                 f'<button class="help-toggle" title="How to read this plot" aria-label="Help">?</button>'
+                f"{extra_header}"
                 f"</div>"
                 f"{help_block}"
                 f"{plot_html}"
@@ -1811,7 +1811,7 @@ def qc_report_split(
         help_toggle = '<button class="help-toggle" title="How to read this plot" aria-label="Help">?</button>'
         body = (
             f'<div class="plot-card"><div class="plot-header">'
-            f"<h3>Dimensionality Reduction</h3>{toggle_html}{help_toggle}</div>"
+            f"<h3>Dimensionality Reduction</h3>{help_toggle}{toggle_html}</div>"
             f'<div class="help-text">{help_text}</div>'
             f"{combined_html}</div>"
         )

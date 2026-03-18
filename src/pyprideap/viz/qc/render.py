@@ -633,9 +633,9 @@ def render_data_completeness(data: DataCompletenessData) -> Figure:
             text=f"{pct_below_30:.1f}% of proteins below 30% missing",
             xref="x2 domain",
             yref="y2 domain",
-            x=0.02,
+            x=0.98,
             y=0.98,
-            xanchor="left",
+            xanchor="right",
             yanchor="top",
             showarrow=False,
             font=dict(size=12),
@@ -650,7 +650,7 @@ def render_data_completeness(data: DataCompletenessData) -> Figure:
             row=2,
             col=1,
             annotation_text="30% threshold",
-            annotation_position="top right",
+            annotation_position="bottom right",
             annotation_font_color="#e67e22",
         )
     fig.update_xaxes(title_text="Missing Frequency (% Samples Below LOD)", range=[0, 100], row=2, col=1)
