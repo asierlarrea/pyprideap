@@ -1334,6 +1334,7 @@ def qc_report(
     dataset: AffinityDataset,
     output: str | Path,
     sdrf_path: str | Path | None = None,
+    strip_plot_title: bool = True,
 ) -> Path:
     """Generate a complete QC HTML report for the dataset.
 
@@ -1347,6 +1348,10 @@ def qc_report(
         Optional path to an SDRF TSV file.  When provided, differential
         expression volcano plots are added to the report with an
         interactive dropdown to select the grouping variable.
+    strip_plot_title : bool
+        Remove the Plotly figure title from each plot (default ``True``).
+        The card header already displays the title, so the in-plot title
+        is redundant.  Set to ``False`` to keep the Plotly title.
     """
     try:
         import plotly  # noqa: F401
@@ -1408,7 +1413,7 @@ def qc_report(
 
         if pca_data is not None:
             pca_fig = R.render_pca(pca_data)
-            pca_fig.update_layout(height=500)
+            pca_fig.update_layout(title="" if strip_plot_title else pca_data.title, height=500)
             _compact_fig(pca_fig)
             js = "cdn" if need_plotly_cdn else False
             need_plotly_cdn = False  # only include CDN once
@@ -1417,7 +1422,7 @@ def qc_report(
 
         if umap_data is not None:
             tsne_fig = R.render_tsne(umap_data)
-            tsne_fig.update_layout(height=500)
+            tsne_fig.update_layout(title="" if strip_plot_title else umap_data.title, height=500)
             _compact_fig(tsne_fig)
             js = "cdn" if need_plotly_cdn else False
             tsne_html = tsne_fig.to_html(full_html=False, include_plotlyjs=js, default_height="500px")
@@ -1460,6 +1465,8 @@ def qc_report(
         if data is None or not isinstance(data, dtype):
             continue
         fig = renderer(data)  # type: ignore[operator]
+        if strip_plot_title:
+            fig.update_layout(title="")
         # Multi-panel renderers set their own height (e.g. 800px); only
         # apply the default for plots that haven't specified one.
         current_height = fig.layout.height
@@ -1518,6 +1525,8 @@ def qc_report(
 
                 for comp_idx, (label, vdata) in enumerate(comparisons):
                     fig = R.render_volcano(vdata)
+                    if strip_plot_title:
+                        fig.update_layout(title="")
                     fig.update_layout(height=500)
                     _compact_fig(fig)
                     js_include: Any = False
@@ -1672,6 +1681,7 @@ def qc_report_split(
     dataset: AffinityDataset,
     output_dir: str | Path,
     no_border: bool = False,
+    strip_plot_title: bool = True,
 ) -> Path:
     """Generate individual QC plot HTML files in a directory.
 
@@ -1734,6 +1744,8 @@ def qc_report_split(
         if data is None or not isinstance(data, dtype):
             continue
         fig = renderer(data)  # type: ignore[operator]
+        if strip_plot_title:
+            fig.update_layout(title="")
         current_height = fig.layout.height
         if current_height is None:
             fig.update_layout(height=500)
@@ -1764,13 +1776,13 @@ def qc_report_split(
 
         if pca_data is not None:
             pca_fig = R.render_pca(pca_data)
-            pca_fig.update_layout(height=500)
+            pca_fig.update_layout(title="" if strip_plot_title else pca_data.title, height=500)
             pca_html = pca_fig.to_html(full_html=False, include_plotlyjs=False, default_height="500px")
             dimred_parts.append(f'<div class="dimred-panel" id="dimred-pca">{pca_html}</div>')
 
         if umap_data is not None:
             tsne_fig = R.render_tsne(umap_data)
-            tsne_fig.update_layout(height=500)
+            tsne_fig.update_layout(title="" if strip_plot_title else umap_data.title, height=500)
             tsne_html = tsne_fig.to_html(full_html=False, include_plotlyjs=False, default_height="500px")
             hidden = ' style="display:none"' if pca_data is not None else ""
             dimred_parts.append(f'<div class="dimred-panel" id="dimred-tsne"{hidden}>{tsne_html}</div>')
