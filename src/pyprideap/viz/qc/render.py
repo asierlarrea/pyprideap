@@ -288,7 +288,12 @@ def render_lod_analysis(data: LodAnalysisData) -> Figure:
     unit = getattr(data, "unit", "NPX")
     fig.update_xaxes(title_text="Protein Rank (by detectability)")
     fig.update_yaxes(title_text=f"% Samples with {unit} > LOD")
-    fig.update_layout(title=data.title, height=500, legend=dict(orientation="h", yanchor="bottom", y=-0.15))
+    fig.update_layout(
+        title=data.title,
+        height=500,
+        legend=dict(orientation="h", yanchor="top", y=-0.18),
+        margin=dict(b=100),
+    )
     return fig
 
 
@@ -659,7 +664,8 @@ def render_data_completeness(data: DataCompletenessData) -> Figure:
     fig.update_layout(
         title=data.title,
         height=800,
-        legend=dict(orientation="h", yanchor="bottom", y=-0.15),
+        legend=dict(orientation="h", yanchor="top", y=-0.18),
+        margin=dict(b=100),
     )
     return fig
 
@@ -753,7 +759,8 @@ def render_plate_cv(data: PlateCvData) -> Figure:
     fig.update_layout(
         title=data.title,
         height=800,
-        legend=dict(orientation="h", yanchor="bottom", y=-0.1),
+        legend=dict(orientation="h", yanchor="top", y=-0.18),
+        margin=dict(b=100),
     )
     return fig
 
@@ -1167,8 +1174,9 @@ def render_col_check(data: ColCheckData) -> Figure:
             xaxis_title="Analyte rank (sorted by QC ratio)",
             yaxis_title="Calibrator QC Ratio",
             xaxis=dict(showticklabels=False),
-            legend=dict(orientation="h", yanchor="bottom", y=-0.15),
+            legend=dict(orientation="h", yanchor="top", y=-0.18),
             height=450,
+            margin=dict(b=100),
         )
     else:
         # Fallback: simple text summary if no ratio data
@@ -1292,7 +1300,8 @@ def render_norm_scale_boxplot(data: NormScaleBoxplotData) -> Figure:
     fig.update_layout(
         title=data.title,
         height=max(400, 300 * n_cols),
-        legend=dict(orientation="h", yanchor="bottom", y=-0.15),
+        legend=dict(orientation="h", yanchor="top", y=-0.18),
+        margin=dict(b=100),
     )
     return fig
 
@@ -1390,7 +1399,8 @@ def render_iqr_median_qc(data: IqrMedianQcData) -> Figure:
     fig.update_layout(
         title=f"{data.title} ({data.n_outlier_samples} outlier samples / {data.n_total_samples} total)",
         height=max(400, 350 * n_rows),
-        legend=dict(orientation="h", yanchor="bottom", y=-0.15),
+        legend=dict(orientation="h", yanchor="top", y=-0.18),
+        margin=dict(b=100),
     )
     return fig
 
@@ -1440,7 +1450,8 @@ def render_uniprot_duplicates(data: UniProtDuplicateData) -> Figure:
         barmode="stack",
         yaxis_title="% of Assays",
         yaxis=dict(range=[0, 100], ticksuffix="%"),
-        legend=dict(orientation="h", yanchor="bottom", y=-0.15, xanchor="center", x=0.5),
+        legend=dict(orientation="h", yanchor="top", y=-0.18, xanchor="center", x=0.5),
+        margin=dict(b=100),
     )
     return fig
 
@@ -1705,6 +1716,7 @@ def render_bridgeability(data: BridgeabilityData) -> Figure:
     fig.update_layout(
         title=f"{data.title}: {data.product1_name} vs {data.product2_name}",
         height=800,
-        legend=dict(orientation="h", yanchor="bottom", y=-0.12),
+        legend=dict(orientation="h", yanchor="top", y=-0.18),
+        margin=dict(b=100),
     )
     return fig
