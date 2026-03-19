@@ -78,6 +78,17 @@ _HELP_TEXT: dict[str, str] = {
         "of 30%%: proteins above this threshold may be unreliable and should be considered for filtering. "
         "Proteins clustered near 0%% are reliably detected; those near 100%% may need filtering."
     ),
+    "sample_completeness": (
+        "Per-sample stacked bar showing Above LOD (green, reliable signal) vs Below LOD "
+        "(orange, measured but below detection limit). Control samples are excluded. "
+        "A sample with a large orange fraction may indicate low protein input or technical issues."
+    ),
+    "missing_frequency_distribution": (
+        "Histogram of per-protein missing rate (%% of samples where signal is below LOD). "
+        "Olink recommends a missing frequency threshold of 30%%: proteins above this threshold "
+        "may be unreliable and should be considered for filtering. "
+        "Proteins clustered near 0%% are reliably detected; those near 100%% may need filtering."
+    ),
     "dimreduction": (
         "Dimensionality reduction projects the high-dimensional protein expression data onto two axes. "
         "Use the toggle switch to switch between PCA and t-SNE. "
@@ -204,7 +215,8 @@ _HELP_TEXT: dict[str, str] = {
 _SECTION_ORDER = [
     ("Quality Overview", ["lod_comparison", "qc_summary"]),
     ("Signal & Distribution", ["distribution", "lod_analysis"]),
-    ("Data Completeness", ["data_completeness"]),
+    ("Sample Completeness", ["sample_completeness"]),
+    ("Missing Frequency Distribution", ["missing_frequency_distribution"]),
     ("Sample Relationships", ["dimreduction", "correlation", "heatmap"]),
     ("Normalization QC", ["norm_scale"]),
     ("Variability", ["cv_distribution", "plate_cv"]),
@@ -883,22 +895,6 @@ def _render_summary_table(
 
     rows.append(_summary_row("", "Features (assays)", str(n_features)))
 
-    # QC columns available in the dataset
-    _known_qc_cols = [
-        "SampleQC",
-        "QC_Warning",
-        "AssayQC",
-        "SampleType",
-        "RowCheck",
-        "ColCheck",
-        "HybControlNormScale",
-    ]
-    qc_cols_found = [c for c in _known_qc_cols if c in samples.columns or c in features.columns]
-    if qc_cols_found:
-        rows.append(_summary_row("", "QC columns", ", ".join(qc_cols_found)))
-    else:
-        rows.append(_summary_row(_status_dot("amber"), "QC columns", "None detected — QC metrics may be limited"))
-
     # --- LOD (right after General) ---
     lod_active = lod_info.get("active")
     lod_analysis = plot_data.get("lod_analysis")
@@ -906,8 +902,6 @@ def _render_summary_table(
     has_any_lod = lod_active is not None or lod_analysis is not None or data_completeness is not None
     if has_any_lod or lod_info.get("sources"):
         rows.append(_summary_group("Limit of Detection"))
-        if lod_active is not None:
-            rows.append(_summary_row("", "LOD source", str(lod_active)))
 
         # Inline LOD sources overview
         status_icons = {"available": "&#9989;", "unavailable": "&#10060;", "insufficient": "&#9888;"}
@@ -960,42 +954,43 @@ def _render_summary_table(
     median_per_sample = float(proteins_per_sample.median())
     rows.append(_summary_row("", "Proteins per sample (median)", f"{median_per_sample:.0f}"))
 
-    # --- Missing Data ---
-    rows.append(_summary_group("Missing Data"))
-    total_cells = numeric.size
-    if total_cells > 0:
-        detection_rate = float(numeric.notna().sum().sum() / total_cells)
-    else:
-        detection_rate = 0.0
-    if detection_rate > 0.90:
-        dr_dot = _status_dot("green")
-    elif detection_rate >= 0.70:
-        dr_dot = _status_dot("amber")
-    else:
-        dr_dot = _status_dot("red")
-    rows.append(_summary_row(dr_dot, "Detection rate", f"{detection_rate:.1%}"))
+    # --- Missing Data (only when no LOD info, since LOD-based completeness is more informative) ---
+    if not has_any_lod:
+        rows.append(_summary_group("Missing Data"))
+        total_cells = numeric.size
+        if total_cells > 0:
+            detection_rate = float(numeric.notna().sum().sum() / total_cells)
+        else:
+            detection_rate = 0.0
+        if detection_rate > 0.90:
+            dr_dot = _status_dot("green")
+        elif detection_rate >= 0.70:
+            dr_dot = _status_dot("amber")
+        else:
+            dr_dot = _status_dot("red")
+        rows.append(_summary_row(dr_dot, "Detection rate", f"{detection_rate:.1%}"))
 
-    # Samples with >20% missing
-    row_miss = numeric.isna().mean(axis=1)
-    n_high_miss_samples = int((row_miss > 0.2).sum())
-    if n_high_miss_samples == 0:
-        hms_dot = _status_dot("green")
-    elif n_samples > 0 and n_high_miss_samples / n_samples <= 0.10:
-        hms_dot = _status_dot("amber")
-    else:
-        hms_dot = _status_dot("red")
-    rows.append(_summary_row(hms_dot, "Samples with &gt;20% missing", str(n_high_miss_samples)))
+        # Samples with >20% missing
+        row_miss = numeric.isna().mean(axis=1)
+        n_high_miss_samples = int((row_miss > 0.2).sum())
+        if n_high_miss_samples == 0:
+            hms_dot = _status_dot("green")
+        elif n_samples > 0 and n_high_miss_samples / n_samples <= 0.10:
+            hms_dot = _status_dot("amber")
+        else:
+            hms_dot = _status_dot("red")
+        rows.append(_summary_row(hms_dot, "Samples with &gt;20% missing", str(n_high_miss_samples)))
 
-    # Proteins with >50% missing
-    col_miss = numeric.isna().mean(axis=0)
-    n_high_miss_prot = int((col_miss > 0.5).sum())
-    if n_high_miss_prot == 0:
-        hmp_dot = _status_dot("green")
-    elif n_features > 0 and n_high_miss_prot / n_features <= 0.05:
-        hmp_dot = _status_dot("amber")
-    else:
-        hmp_dot = _status_dot("red")
-    rows.append(_summary_row(hmp_dot, "Proteins with &gt;50% missing", str(n_high_miss_prot)))
+        # Proteins with >50% missing
+        col_miss = numeric.isna().mean(axis=0)
+        n_high_miss_prot = int((col_miss > 0.5).sum())
+        if n_high_miss_prot == 0:
+            hmp_dot = _status_dot("green")
+        elif n_features > 0 and n_high_miss_prot / n_features <= 0.05:
+            hmp_dot = _status_dot("amber")
+        else:
+            hmp_dot = _status_dot("red")
+        rows.append(_summary_row(hmp_dot, "Proteins with &gt;50% missing", str(n_high_miss_prot)))
 
     # --- Variability ---
     cv_data = plot_data.get("cv_distribution")
@@ -1030,22 +1025,6 @@ def _render_summary_table(
             else:
                 pi_dot = _status_dot("red")
             rows.append(_summary_row(pi_dot, "Median inter-plate CV", f"{med_inter:.1%}"))
-
-    # --- Expression ---
-    rows.append(_summary_group("Expression"))
-    vals = numeric.values.flatten()
-    vals_clean = vals[~np.isnan(vals)] if len(vals) > 0 else vals
-    if len(vals_clean) > 0:
-        med_expr = float(np.median(vals_clean))
-        dyn_range = float(np.max(vals_clean) - np.min(vals_clean))
-        sd_expr = float(np.std(vals_clean))
-        rows.append(_summary_row("", "Median expression", f"{med_expr:.2f}"))
-        rows.append(_summary_row("", "Dynamic range", f"{dyn_range:.2f}"))
-        rows.append(_summary_row("", "SD of expression", f"{sd_expr:.2f}"))
-    else:
-        rows.append(_summary_row("", "Median expression", "N/A"))
-        rows.append(_summary_row("", "Dynamic range", "N/A"))
-        rows.append(_summary_row("", "SD of expression", "N/A"))
 
     # --- QC Status (Olink only) ---
     if "SampleQC" in samples.columns:
@@ -1090,40 +1069,24 @@ def _render_summary_table(
     from pyprideap.core import Platform as _Platform
 
     iqr_median_data = plot_data.get("iqr_median_qc")
-    uniprot_dup_data = plot_data.get("uniprot_duplicates")
-    has_olink_qc = isinstance(iqr_median_data, IqrMedianQcData) or isinstance(uniprot_dup_data, UniProtDuplicateData)
-    if has_olink_qc:
+    if isinstance(iqr_median_data, IqrMedianQcData):
         rows.append(_summary_group("Assay QC"))
-
-        if isinstance(iqr_median_data, IqrMedianQcData):
-            n_outlier = iqr_median_data.n_outlier_samples
-            n_total = iqr_median_data.n_total_samples
-            outlier_rate = n_outlier / n_total if n_total > 0 else 0.0
-            if n_outlier == 0:
-                iqr_dot = _status_dot("green")
-            elif outlier_rate < 0.10:
-                iqr_dot = _status_dot("amber")
-            else:
-                iqr_dot = _status_dot("red")
-            rows.append(
-                _summary_row(
-                    iqr_dot,
-                    "IQR/Median outlier samples",
-                    f"{n_outlier} / {n_total}",
-                )
+        n_outlier = iqr_median_data.n_outlier_samples
+        n_total = iqr_median_data.n_total_samples
+        outlier_rate = n_outlier / n_total if n_total > 0 else 0.0
+        if n_outlier == 0:
+            iqr_dot = _status_dot("green")
+        elif outlier_rate < 0.10:
+            iqr_dot = _status_dot("amber")
+        else:
+            iqr_dot = _status_dot("red")
+        rows.append(
+            _summary_row(
+                iqr_dot,
+                "IQR/Median outlier samples",
+                f"{n_outlier} / {n_total}",
             )
-
-        if isinstance(uniprot_dup_data, UniProtDuplicateData):
-            n_proteins = uniprot_dup_data.n_unique_proteins
-            n_assays = uniprot_dup_data.n_total_assays
-            dup_dot = _status_dot("green")  # informational
-            rows.append(
-                _summary_row(
-                    dup_dot,
-                    "Unique proteins / Assays",
-                    f"{n_proteins} / {n_assays}",
-                )
-            )
+        )
 
     # --- SomaScan QC Flags ---
     if dataset.platform == _Platform.SOMASCAN:
@@ -1371,7 +1334,8 @@ def qc_report(
         "lod_analysis": (LodAnalysisData, R.render_lod_analysis),
         "heatmap": (HeatmapData, R.render_heatmap),
         "correlation": (CorrelationData, R.render_correlation),
-        "data_completeness": (DataCompletenessData, R.render_data_completeness),
+        "sample_completeness": (DataCompletenessData, R.render_sample_completeness),
+        "missing_frequency_distribution": (DataCompletenessData, R.render_missing_frequency),
         "cv_distribution": (CvDistributionData, R.render_cv_distribution),
         "plate_cv": (PlateCvData, R.render_plate_cv),
         "norm_scale": (NormScaleData, R.render_norm_scale),
@@ -1392,6 +1356,12 @@ def qc_report(
     rendered: dict[str, tuple[str, ...]] = {}  # key -> (title, html[, extra_header])
     first_key = None
 
+    # Map split renderer keys to their compute_all data keys
+    _DATA_KEY_MAP = {
+        "sample_completeness": "data_completeness",
+        "missing_frequency_distribution": "data_completeness",
+    }
+
     # Handle combined dimensionality reduction (PCA + t-SNE in one panel with toggle)
     _pca_raw = plot_data.get("pca")
     _umap_raw = plot_data.get("umap")  # actually t-SNE data
@@ -1404,7 +1374,8 @@ def qc_report(
             if key == "dimreduction":
                 first_key = "dimreduction"
                 break
-            if key in _RENDERERS and plot_data.get(key) is not None:
+            dk = _DATA_KEY_MAP.get(key, key)
+            if key in _RENDERERS and plot_data.get(dk) is not None:
                 first_key = key
                 break
 
@@ -1456,12 +1427,14 @@ def qc_report(
     # Find first key if not already set
     if first_key is None:
         for key in display_order:
-            if key in _RENDERERS and plot_data.get(key) is not None:
+            data_key = _DATA_KEY_MAP.get(key, key)
+            if key in _RENDERERS and plot_data.get(data_key) is not None:
                 first_key = key
                 break
 
     for key, (dtype, renderer) in _RENDERERS.items():
-        data = plot_data.get(key)
+        data_key = _DATA_KEY_MAP.get(key, key)
+        data = plot_data.get(data_key)
         if data is None or not isinstance(data, dtype):
             continue
         fig = renderer(data)  # type: ignore[operator]
@@ -1476,7 +1449,11 @@ def qc_report(
         plot_height = f"{fig.layout.height}px"
         js = "cdn" if key == first_key else False
         plot_html = fig.to_html(full_html=False, include_plotlyjs=js, default_height=plot_height)
-        rendered[key] = (data.title, plot_html)  # type: ignore[attr-defined]
+        if key in _DATA_KEY_MAP:
+            title = key.replace("_", " ").title()
+        else:
+            title = getattr(data, "title", key.replace("_", " ").title())
+        rendered[key] = (title, plot_html)  # type: ignore[attr-defined]
         logger.debug("qc_report: rendered %s plot", key)
 
     # SDRF-driven differential expression volcano plots
@@ -1682,6 +1659,7 @@ def qc_report_split(
     output_dir: str | Path,
     no_border: bool = False,
     strip_plot_title: bool = True,
+    two_sides: bool = True,
 ) -> Path:
     """Generate individual QC plot HTML files in a directory.
 
@@ -1697,6 +1675,13 @@ def qc_report_split(
         Directory to write individual HTML files into. Created if it doesn't exist.
     no_border : bool
         If True, remove card borders and shadows from standalone plot files.
+    strip_plot_title : bool
+        Remove the Plotly figure title from each plot (default ``True``).
+    two_sides : bool
+        When ``True``, also generate combined HTML files that stack
+        logically related plots so that each combined file is
+        height-matched for side-by-side panel layouts
+        (e.g. Dataset Summary on the left, QC + LOD overview on the right).
 
     Returns
     -------
@@ -1725,7 +1710,8 @@ def qc_report_split(
         "lod_analysis": (LodAnalysisData, R.render_lod_analysis),
         "heatmap": (HeatmapData, R.render_heatmap),
         "correlation": (CorrelationData, R.render_correlation),
-        "data_completeness": (DataCompletenessData, R.render_data_completeness),
+        "sample_completeness": (DataCompletenessData, R.render_sample_completeness),
+        "missing_frequency_distribution": (DataCompletenessData, R.render_missing_frequency),
         "cv_distribution": (CvDistributionData, R.render_cv_distribution),
         "plate_cv": (PlateCvData, R.render_plate_cv),
         "norm_scale": (NormScaleData, R.render_norm_scale),
@@ -1737,10 +1723,29 @@ def qc_report_split(
     }
 
     written: list[str] = []
+    # Collect body fragments keyed by plot name for two_sides combinations
+    bodies: dict[str, str] = {}
+
+    # Keys that will be merged into combined files (skip individual output)
+    _TWO_SIDES_COMBOS = [
+        ("qc_lod_overview", "QC & LOD Overview", ["qc_summary", "lod_analysis"]),
+        ("iqr_platecv", "Outlier & Plate CV", ["iqr_median_qc", "plate_cv"]),
+    ]
+    combined_keys: set[str] = set()
+    if two_sides:
+        for _, _, keys in _TWO_SIDES_COMBOS:
+            combined_keys.update(keys)
+
+    # Map split renderer keys to their compute_all data keys
+    _DATA_KEY_MAP = {
+        "sample_completeness": "data_completeness",
+        "missing_frequency_distribution": "data_completeness",
+    }
 
     # Render each plot as a standalone HTML file
     for key, (dtype, renderer) in _RENDERERS.items():
-        data = plot_data.get(key)
+        data_key = _DATA_KEY_MAP.get(key, key)
+        data = plot_data.get(data_key)
         if data is None or not isinstance(data, dtype):
             continue
         fig = renderer(data)  # type: ignore[operator]
@@ -1751,7 +1756,10 @@ def qc_report_split(
             fig.update_layout(height=500)
         plot_height = f"{fig.layout.height}px"
         plot_html = fig.to_html(full_html=False, include_plotlyjs=False, default_height=plot_height)
-        title = getattr(data, "title", key.replace("_", " ").title())
+        if key in _DATA_KEY_MAP:
+            title = key.replace("_", " ").title()
+        else:
+            title = getattr(data, "title", key.replace("_", " ").title())
         help_html = _HELP_TEXT.get(key, "")
         help_toggle = '<button class="help-toggle" title="How to read this plot" aria-label="Help">?</button>'
         help_block = f'<div class="help-text">{help_html}</div>' if help_html else ""
@@ -1759,6 +1767,11 @@ def qc_report_split(
             f'<div class="plot-card"><div class="plot-header"><h3>{title}</h3>'
             f"{help_toggle}</div>{help_block}{plot_html}</div>"
         )
+        bodies[key] = body
+        # Skip individual file when this key will be in a combined file
+        if key in combined_keys:
+            logger.debug("qc_report_split: %s deferred to combined file", key)
+            continue
         page = _wrap_standalone_html(f"{title} — {platform_label}", body, no_border=no_border)
         (output_dir / f"{key}.html").write_text(page, encoding="utf-8")
         written.append(key)
@@ -1815,17 +1828,42 @@ def qc_report_split(
             f'<div class="help-text">{help_text}</div>'
             f"{combined_html}</div>"
         )
-        page = _wrap_standalone_html(f"Dimensionality Reduction — {platform_label}", body, no_border=no_border)
-        (output_dir / "dimreduction.html").write_text(page, encoding="utf-8")
-        written.append("dimreduction")
+        bodies["dimreduction"] = body
+        if "dimreduction" not in combined_keys:
+            page = _wrap_standalone_html(
+                f"Dimensionality Reduction — {platform_label}",
+                body,
+                no_border=no_border,
+            )
+            (output_dir / "dimreduction.html").write_text(page, encoding="utf-8")
+            written.append("dimreduction")
+        else:
+            logger.debug("qc_report_split: dimreduction deferred to combined file")
 
     # Summary table (includes LOD sources inline)
     summary_html = _render_summary_table(dataset, plot_data, lod_info)
+    bodies["summary"] = summary_html
     page = _wrap_standalone_html(
         f"Dataset Summary — {platform_label}", summary_html, include_plotlyjs=False, no_border=no_border
     )
     (output_dir / "summary.html").write_text(page, encoding="utf-8")
     written.append("summary")
+
+    # --- two_sides: generate combined HTML files for side-by-side layout ---
+    if two_sides:
+        for filename, page_title, keys in _TWO_SIDES_COMBOS:
+            parts = [bodies[k] for k in keys if k in bodies]
+            if not parts:
+                continue
+            combined_body = "\n".join(parts)
+            page = _wrap_standalone_html(
+                f"{page_title} — {platform_label}",
+                combined_body,
+                no_border=no_border,
+            )
+            (output_dir / f"{filename}.html").write_text(page, encoding="utf-8")
+            written.append(filename)
+            logger.debug("qc_report_split: two_sides combined %s", filename)
 
     logger.debug("qc_report_split: written %d files to %s", len(written), output_dir)
     return output_dir

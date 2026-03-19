@@ -88,7 +88,7 @@ class DataCompletenessData:
     below_lod_rate: list[float]  # per-sample fraction below LOD (0-1)
     protein_ids: list[str] = field(default_factory=list)  # per-protein identifiers
     missing_freq: list[float] = field(default_factory=list)  # per-protein fraction below LOD (0-1)
-    title: str = "Data Completeness"
+    title: str = "Sample Completeness"
 
 
 @dataclass
