@@ -339,7 +339,7 @@ class TestQcReport:
         qc_report(ds, output)
         content = output.read_text()
         assert "Dataset Summary" in content
-        assert "Detection rate" in content
+        assert "Features (assays)" in content
         assert "Median CV" in content
         # At least one traffic-light status dot should be present
         assert any(dot in content for dot in ["dot-green", "dot-amber", "dot-red"])
@@ -363,7 +363,7 @@ class TestQcReport:
         # Summary should contain the table
         summary = (output_dir / "summary.html").read_text()
         assert "Dataset Summary" in summary
-        assert "Detection rate" in summary
+        assert "Features (assays)" in summary
 
     def test_somascan_report(self, tmp_path):
         ds = _make_somascan_dataset()
