@@ -580,7 +580,7 @@ def render_data_completeness(data: DataCompletenessData) -> Figure:
     fig = make_subplots(
         rows=2,
         cols=1,
-        subplot_titles=["Per-Sample Data Completeness", "Missing Frequency Distribution"],
+        subplot_titles=["Sample Completeness", "Missing Frequency"],
         vertical_spacing=0.35,
     )
 
@@ -665,6 +665,94 @@ def render_data_completeness(data: DataCompletenessData) -> Figure:
         title=data.title,
         height=800,
         legend=dict(orientation="h", yanchor="top", y=-0.18),
+        margin=dict(b=100),
+    )
+    return fig
+
+
+def render_sample_completeness(data: DataCompletenessData) -> Figure:
+    """Per-sample stacked bar showing above/below LOD as standalone plot."""
+    go, _ = _import_plotly()
+
+    _MAX_LABEL = 20
+    short_ids = [s if len(s) <= _MAX_LABEL else s[:_MAX_LABEL] + "\u2026" for s in data.sample_ids]
+
+    fig = go.Figure()
+    fig.add_trace(
+        go.Bar(
+            x=short_ids,
+            y=[r * 100 for r in data.above_lod_rate],
+            name="Above LOD",
+            marker_color="#2ecc71",
+            customdata=data.sample_ids,
+            hovertemplate="%{customdata}<br>Above LOD: %{y:.1f}%<extra></extra>",
+        ),
+    )
+    fig.add_trace(
+        go.Bar(
+            x=short_ids,
+            y=[r * 100 for r in data.below_lod_rate],
+            name="Below LOD",
+            marker_color="#f39c12",
+            customdata=data.sample_ids,
+            hovertemplate="%{customdata}<br>Below LOD: %{y:.1f}%<extra></extra>",
+        ),
+    )
+    fig.update_xaxes(title_text="", tickangle=-45)
+    fig.update_yaxes(title_text="% of Proteins", range=[0, 100], ticksuffix="%")
+    fig.update_layout(
+        title="Sample Completeness",
+        barmode="stack",
+        height=500,
+        legend=dict(orientation="h", yanchor="top", y=-0.18),
+        margin=dict(b=100),
+    )
+    return fig
+
+
+def render_missing_frequency(data: DataCompletenessData) -> Figure:
+    """Per-protein missing frequency histogram as standalone plot."""
+    go, _ = _import_plotly()
+
+    fig = go.Figure()
+    if data.missing_freq:
+        missing_pct = [f * 100 for f in data.missing_freq]
+        fig.add_trace(
+            go.Histogram(
+                x=missing_pct,
+                nbinsx=25,
+                marker_color="#e74c3c",
+                showlegend=False,
+            ),
+        )
+        n_below_30 = sum(1 for f in data.missing_freq if f < 0.30)
+        pct_below_30 = n_below_30 / len(data.missing_freq) * 100 if data.missing_freq else 0
+        fig.add_annotation(
+            text=f"{pct_below_30:.1f}% of proteins below 30% missing",
+            xref="paper",
+            yref="paper",
+            x=0.98,
+            y=0.98,
+            xanchor="right",
+            yanchor="top",
+            showarrow=False,
+            font=dict(size=12),
+            bgcolor="rgba(255,255,255,0.8)",
+        )
+        fig.add_vline(
+            x=30,
+            line_dash="dash",
+            line_color="#e67e22",
+            line_width=2,
+            annotation_text="30% threshold",
+            annotation_position="bottom right",
+            annotation_font_color="#e67e22",
+        )
+    fig.update_xaxes(title_text="Missing Frequency (% Samples Below LOD)", range=[0, 100])
+    fig.update_yaxes(title_text="Number of Proteins")
+    fig.update_layout(
+        title="Missing Frequency Distribution",
+        height=500,
         margin=dict(b=100),
     )
     return fig

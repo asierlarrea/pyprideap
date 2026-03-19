@@ -78,6 +78,17 @@ _HELP_TEXT: dict[str, str] = {
         "of 30%%: proteins above this threshold may be unreliable and should be considered for filtering. "
         "Proteins clustered near 0%% are reliably detected; those near 100%% may need filtering."
     ),
+    "sample_completeness": (
+        "Per-sample stacked bar showing Above LOD (green, reliable signal) vs Below LOD "
+        "(orange, measured but below detection limit). Control samples are excluded. "
+        "A sample with a large orange fraction may indicate low protein input or technical issues."
+    ),
+    "missing_frequency_distribution": (
+        "Histogram of per-protein missing rate (%% of samples where signal is below LOD). "
+        "Olink recommends a missing frequency threshold of 30%%: proteins above this threshold "
+        "may be unreliable and should be considered for filtering. "
+        "Proteins clustered near 0%% are reliably detected; those near 100%% may need filtering."
+    ),
     "dimreduction": (
         "Dimensionality reduction projects the high-dimensional protein expression data onto two axes. "
         "Use the toggle switch to switch between PCA and t-SNE. "
@@ -204,7 +215,8 @@ _HELP_TEXT: dict[str, str] = {
 _SECTION_ORDER = [
     ("Quality Overview", ["lod_comparison", "qc_summary"]),
     ("Signal & Distribution", ["distribution", "lod_analysis"]),
-    ("Data Completeness", ["data_completeness"]),
+    ("Sample Completeness", ["sample_completeness"]),
+    ("Missing Frequency Distribution", ["missing_frequency_distribution"]),
     ("Sample Relationships", ["dimreduction", "correlation", "heatmap"]),
     ("Normalization QC", ["norm_scale"]),
     ("Variability", ["cv_distribution", "plate_cv"]),
@@ -1371,7 +1383,8 @@ def qc_report(
         "lod_analysis": (LodAnalysisData, R.render_lod_analysis),
         "heatmap": (HeatmapData, R.render_heatmap),
         "correlation": (CorrelationData, R.render_correlation),
-        "data_completeness": (DataCompletenessData, R.render_data_completeness),
+        "sample_completeness": (DataCompletenessData, R.render_sample_completeness),
+        "missing_frequency_distribution": (DataCompletenessData, R.render_missing_frequency),
         "cv_distribution": (CvDistributionData, R.render_cv_distribution),
         "plate_cv": (PlateCvData, R.render_plate_cv),
         "norm_scale": (NormScaleData, R.render_norm_scale),
@@ -1392,6 +1405,12 @@ def qc_report(
     rendered: dict[str, tuple[str, ...]] = {}  # key -> (title, html[, extra_header])
     first_key = None
 
+    # Map split renderer keys to their compute_all data keys
+    _DATA_KEY_MAP = {
+        "sample_completeness": "data_completeness",
+        "missing_frequency_distribution": "data_completeness",
+    }
+
     # Handle combined dimensionality reduction (PCA + t-SNE in one panel with toggle)
     _pca_raw = plot_data.get("pca")
     _umap_raw = plot_data.get("umap")  # actually t-SNE data
@@ -1404,7 +1423,8 @@ def qc_report(
             if key == "dimreduction":
                 first_key = "dimreduction"
                 break
-            if key in _RENDERERS and plot_data.get(key) is not None:
+            dk = _DATA_KEY_MAP.get(key, key)
+            if key in _RENDERERS and plot_data.get(dk) is not None:
                 first_key = key
                 break
 
@@ -1456,12 +1476,14 @@ def qc_report(
     # Find first key if not already set
     if first_key is None:
         for key in display_order:
-            if key in _RENDERERS and plot_data.get(key) is not None:
+            data_key = _DATA_KEY_MAP.get(key, key)
+            if key in _RENDERERS and plot_data.get(data_key) is not None:
                 first_key = key
                 break
 
     for key, (dtype, renderer) in _RENDERERS.items():
-        data = plot_data.get(key)
+        data_key = _DATA_KEY_MAP.get(key, key)
+        data = plot_data.get(data_key)
         if data is None or not isinstance(data, dtype):
             continue
         fig = renderer(data)  # type: ignore[operator]
@@ -1476,7 +1498,11 @@ def qc_report(
         plot_height = f"{fig.layout.height}px"
         js = "cdn" if key == first_key else False
         plot_html = fig.to_html(full_html=False, include_plotlyjs=js, default_height=plot_height)
-        rendered[key] = (data.title, plot_html)  # type: ignore[attr-defined]
+        if key in _DATA_KEY_MAP:
+            title = key.replace("_", " ").title()
+        else:
+            title = getattr(data, "title", key.replace("_", " ").title())
+        rendered[key] = (title, plot_html)  # type: ignore[attr-defined]
         logger.debug("qc_report: rendered %s plot", key)
 
     # SDRF-driven differential expression volcano plots
@@ -1682,6 +1708,7 @@ def qc_report_split(
     output_dir: str | Path,
     no_border: bool = False,
     strip_plot_title: bool = True,
+    two_sides: bool = True,
 ) -> Path:
     """Generate individual QC plot HTML files in a directory.
 
@@ -1697,6 +1724,13 @@ def qc_report_split(
         Directory to write individual HTML files into. Created if it doesn't exist.
     no_border : bool
         If True, remove card borders and shadows from standalone plot files.
+    strip_plot_title : bool
+        Remove the Plotly figure title from each plot (default ``True``).
+    two_sides : bool
+        When ``True``, also generate combined HTML files that stack
+        logically related plots so that each combined file is
+        height-matched for side-by-side panel layouts
+        (e.g. Dataset Summary on the left, QC + LOD overview on the right).
 
     Returns
     -------
@@ -1725,7 +1759,8 @@ def qc_report_split(
         "lod_analysis": (LodAnalysisData, R.render_lod_analysis),
         "heatmap": (HeatmapData, R.render_heatmap),
         "correlation": (CorrelationData, R.render_correlation),
-        "data_completeness": (DataCompletenessData, R.render_data_completeness),
+        "sample_completeness": (DataCompletenessData, R.render_sample_completeness),
+        "missing_frequency_distribution": (DataCompletenessData, R.render_missing_frequency),
         "cv_distribution": (CvDistributionData, R.render_cv_distribution),
         "plate_cv": (PlateCvData, R.render_plate_cv),
         "norm_scale": (NormScaleData, R.render_norm_scale),
@@ -1737,10 +1772,29 @@ def qc_report_split(
     }
 
     written: list[str] = []
+    # Collect body fragments keyed by plot name for two_sides combinations
+    bodies: dict[str, str] = {}
+
+    # Keys that will be merged into combined files (skip individual output)
+    _TWO_SIDES_COMBOS = [
+        ("qc_lod_overview", "QC & LOD Overview", ["qc_summary", "lod_analysis"]),
+        ("iqr_platecv", "Outlier & Plate CV", ["iqr_median_qc", "plate_cv"]),
+    ]
+    combined_keys: set[str] = set()
+    if two_sides:
+        for _, _, keys in _TWO_SIDES_COMBOS:
+            combined_keys.update(keys)
+
+    # Map split renderer keys to their compute_all data keys
+    _DATA_KEY_MAP = {
+        "sample_completeness": "data_completeness",
+        "missing_frequency_distribution": "data_completeness",
+    }
 
     # Render each plot as a standalone HTML file
     for key, (dtype, renderer) in _RENDERERS.items():
-        data = plot_data.get(key)
+        data_key = _DATA_KEY_MAP.get(key, key)
+        data = plot_data.get(data_key)
         if data is None or not isinstance(data, dtype):
             continue
         fig = renderer(data)  # type: ignore[operator]
@@ -1751,7 +1805,10 @@ def qc_report_split(
             fig.update_layout(height=500)
         plot_height = f"{fig.layout.height}px"
         plot_html = fig.to_html(full_html=False, include_plotlyjs=False, default_height=plot_height)
-        title = getattr(data, "title", key.replace("_", " ").title())
+        if key in _DATA_KEY_MAP:
+            title = key.replace("_", " ").title()
+        else:
+            title = getattr(data, "title", key.replace("_", " ").title())
         help_html = _HELP_TEXT.get(key, "")
         help_toggle = '<button class="help-toggle" title="How to read this plot" aria-label="Help">?</button>'
         help_block = f'<div class="help-text">{help_html}</div>' if help_html else ""
@@ -1759,6 +1816,11 @@ def qc_report_split(
             f'<div class="plot-card"><div class="plot-header"><h3>{title}</h3>'
             f"{help_toggle}</div>{help_block}{plot_html}</div>"
         )
+        bodies[key] = body
+        # Skip individual file when this key will be in a combined file
+        if key in combined_keys:
+            logger.debug("qc_report_split: %s deferred to combined file", key)
+            continue
         page = _wrap_standalone_html(f"{title} — {platform_label}", body, no_border=no_border)
         (output_dir / f"{key}.html").write_text(page, encoding="utf-8")
         written.append(key)
@@ -1815,17 +1877,42 @@ def qc_report_split(
             f'<div class="help-text">{help_text}</div>'
             f"{combined_html}</div>"
         )
-        page = _wrap_standalone_html(f"Dimensionality Reduction — {platform_label}", body, no_border=no_border)
-        (output_dir / "dimreduction.html").write_text(page, encoding="utf-8")
-        written.append("dimreduction")
+        bodies["dimreduction"] = body
+        if "dimreduction" not in combined_keys:
+            page = _wrap_standalone_html(
+                f"Dimensionality Reduction — {platform_label}",
+                body,
+                no_border=no_border,
+            )
+            (output_dir / "dimreduction.html").write_text(page, encoding="utf-8")
+            written.append("dimreduction")
+        else:
+            logger.debug("qc_report_split: dimreduction deferred to combined file")
 
     # Summary table (includes LOD sources inline)
     summary_html = _render_summary_table(dataset, plot_data, lod_info)
+    bodies["summary"] = summary_html
     page = _wrap_standalone_html(
         f"Dataset Summary — {platform_label}", summary_html, include_plotlyjs=False, no_border=no_border
     )
     (output_dir / "summary.html").write_text(page, encoding="utf-8")
     written.append("summary")
+
+    # --- two_sides: generate combined HTML files for side-by-side layout ---
+    if two_sides:
+        for filename, page_title, keys in _TWO_SIDES_COMBOS:
+            parts = [bodies[k] for k in keys if k in bodies]
+            if not parts:
+                continue
+            combined_body = "\n".join(parts)
+            page = _wrap_standalone_html(
+                f"{page_title} — {platform_label}",
+                combined_body,
+                no_border=no_border,
+            )
+            (output_dir / f"{filename}.html").write_text(page, encoding="utf-8")
+            written.append(filename)
+            logger.debug("qc_report_split: two_sides combined %s", filename)
 
     logger.debug("qc_report_split: written %d files to %s", len(written), output_dir)
     return output_dir

@@ -92,6 +92,7 @@ def _generate_report(
     split: bool = False,
     sdrf_path: Path | None = None,
     no_border: bool = True,
+    two_sides: bool = True,
 ) -> Path:
     """Read a data file and generate a QC report."""
     import pyprideap as pp
@@ -114,7 +115,7 @@ def _generate_report(
 
         click.echo("Generating individual plot files...")
         logger.debug("Output directory: %s", output_path)
-        result = qc_report_split(ds, output_path, no_border=no_border)
+        result = qc_report_split(ds, output_path, no_border=no_border, two_sides=two_sides)
         n_files = len(list(result.glob("*.html")))
         click.echo(f"  {n_files} HTML files saved to {result}/")
         return result
@@ -161,6 +162,11 @@ def main() -> None:
 @click.option(
     "--no-border/--border", default=True, help="Remove card borders from split plot files (default: no border)."
 )
+@click.option(
+    "--two-sides/--no-two-sides",
+    default=True,
+    help="Generate combined plot files for side-by-side panel layouts (default: enabled).",
+)
 @click.option("-v", "--verbose", is_flag=True, default=False, help="Enable verbose logging output.")
 def report(
     input_file: str | None,
@@ -170,6 +176,7 @@ def report(
     split: bool,
     sdrf: str | None,
     no_border: bool,
+    two_sides: bool,
     verbose: bool,
 ) -> None:
     """Generate a QC report from a data file or PAD accession."""
@@ -203,7 +210,15 @@ def report(
                         out = Path(f"{output_path}/{stem}")
                     else:
                         out = Path(f"{output_path}/{stem}.html")
-                    _generate_report(f, out, platform=platform, split=split, sdrf_path=sdrf_path, no_border=no_border)
+                    _generate_report(
+                        f,
+                        out,
+                        platform=platform,
+                        split=split,
+                        sdrf_path=sdrf_path,
+                        no_border=no_border,
+                        two_sides=two_sides,
+                    )
                 except Exception as e:
                     logger.debug("Error processing %s: %s", f.name, e, exc_info=True)
                     click.echo(f"  Skipping {f.name}: {e}", err=True)
@@ -219,6 +234,7 @@ def report(
             split=split,
             sdrf_path=sdrf_path,
             no_border=no_border,
+            two_sides=two_sides,
         )
 
 
