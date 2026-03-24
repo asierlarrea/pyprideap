@@ -100,13 +100,31 @@ def get_unique_samples(
             int(is_control.sum()),
         )
 
-    # Prefer SampleID, fall back to SampleName, then index
-    if "SampleID" in samples.columns:
-        id_col = "SampleID"
-    elif "SampleName" in samples.columns:
-        id_col = "SampleName"
-    else:
-        logger.debug("get_unique_samples: no SampleID or SampleName column, using row index")
+    # Resolve the best sample identifier column.
+    # SampleID may actually be an assay index in some Olink files (its
+    # cardinality equals the number of features).  When that happens, skip
+    # it and prefer SampleName instead.  Also accept the SomaScan-style
+    # ``SampleId`` (lowercase 'd').
+    id_col: str | None = None
+    for candidate in ("SampleID", "SampleId", "SampleName"):
+        if candidate not in samples.columns:
+            continue
+        # Guard against assay-indexed columns: if the number of unique
+        # values equals the number of features, it is likely an assay key.
+        n_unique = samples[candidate].nunique()
+        n_features = len(dataset.features)
+        if n_unique == n_features and n_features > 0 and n_unique != len(samples):
+            logger.debug(
+                "get_unique_samples: skipping %s (nunique=%d matches feature count)",
+                candidate,
+                n_unique,
+            )
+            continue
+        id_col = candidate
+        break
+
+    if id_col is None:
+        logger.debug("get_unique_samples: no suitable sample ID column found, using row index")
         ids = [str(i) for i in samples.index]
         return sorted(set(ids))
 
