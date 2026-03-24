@@ -90,8 +90,6 @@ def get_unique_samples(
     Returns:
         Sorted list of unique sample identifier strings.
     """
-    import pandas as pd
-
     samples = dataset.samples
 
     if exclude_controls and "SampleType" in samples.columns:
