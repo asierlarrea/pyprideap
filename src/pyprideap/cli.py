@@ -193,6 +193,9 @@ def report(
         click.echo("Error: Provide either an input file or --accession, not both.", err=True)
         sys.exit(1)
 
+    # For local input, -o is a file path. For accessions, -o can be either:
+    # - a file path (when a single data file is downloaded and split is False)
+    # - a directory (when multiple files are downloaded, or when split is True)
     output_path = Path(output) if output else Path(".")
     sdrf_path = Path(sdrf) if sdrf else None
 
@@ -210,9 +213,15 @@ def report(
                     if stem.endswith(".npx") or stem.endswith(".ct"):
                         stem = Path(stem).stem
                     if split:
-                        out = Path(f"{output_path}/{stem}")
+                        # Always treat -o as a directory for split mode
+                        out = (output_path / stem) if output else Path(f"{accession}_{stem}_qc_plots")
                     else:
-                        out = Path(f"{output_path}/{stem}.html")
+                        if output and len(files) == 1 and output_path.suffix.lower() == ".html":
+                            # Respect explicit output file path for single-file accessions
+                            out = output_path
+                        else:
+                            # Treat -o as a directory, or default to a generated filename in CWD
+                            out = (output_path / f"{stem}.html") if output else Path(f"{accession}_{stem}_qc_report.html")
                     _generate_report(
                         f,
                         out,
