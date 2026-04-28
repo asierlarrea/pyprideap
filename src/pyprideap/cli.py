@@ -7,7 +7,11 @@ Usage:
     pyprideap report <file> -p olink               Force platform type
     pyprideap report <file> --split                Output individual plots as separate HTML files
     pyprideap proteins-above-lod <file>            List UniProt accessions above LOD
+    pyprideap proteins-above-lod -a PAD000001      Download data from PRIDE and list proteins
     pyprideap proteins-above-lod <file> -t 80      Custom threshold (default 50%)
+    pyprideap unique-samples <file>                List unique sample identifiers
+    pyprideap unique-samples -a PAD000001          Download data from PRIDE and list samples
+    pyprideap unique-samples <file> -o samples.txt Save to file
 
 Examples:
     pyprideap report data.npx.csv
@@ -17,7 +21,12 @@ Examples:
     pyprideap report ambiguous.csv -p somascan
     pyprideap report data.npx.csv -v
     pyprideap proteins-above-lod data.npx.csv
+    pyprideap proteins-above-lod -a PAD000001
     pyprideap proteins-above-lod data.npx.csv -t 80 -o proteins.txt
+    pyprideap unique-samples data.npx.csv
+    pyprideap unique-samples -a PAD000001
+    pyprideap unique-samples data.npx.csv -o samples.txt
+    pyprideap unique-samples data.npx.csv --exclude-controls
 """
 
 from __future__ import annotations
@@ -28,6 +37,11 @@ import tempfile
 from pathlib import Path
 
 import click
+
+from pyprideap.io.readers.registry import read as _read
+from pyprideap.processing.filtering import get_unique_samples as _get_unique_samples
+from pyprideap.processing.lod import get_proteins_above_lod as _get_proteins_above_lod
+from pyprideap.viz.qc.report import qc_report as _qc_report
 
 logger = logging.getLogger("pyprideap")
 
@@ -89,13 +103,12 @@ def _generate_report(
     platform: str | None = None,
     split: bool = False,
     sdrf_path: Path | None = None,
+    no_border: bool = True,
 ) -> Path:
     """Read a data file and generate a QC report."""
-    import pyprideap as pp
-
     click.echo(f"Reading {input_path.name}...")
     logger.debug("Full path: %s", input_path)
-    ds = pp.read(input_path, platform=platform)
+    ds = _read(input_path, platform=platform)
     click.echo(f"  {len(ds.samples)} samples, {len(ds.features)} features ({ds.platform.value})")
     logger.debug("Samples columns: %s", list(ds.samples.columns))
     logger.debug("Features columns: %s", list(ds.features.columns))
@@ -111,7 +124,7 @@ def _generate_report(
 
         click.echo("Generating individual plot files...")
         logger.debug("Output directory: %s", output_path)
-        result = qc_report_split(ds, output_path)
+        result = qc_report_split(ds, output_path, no_border=no_border)
         n_files = len(list(result.glob("*.html")))
         click.echo(f"  {n_files} HTML files saved to {result}/")
         return result
@@ -129,7 +142,7 @@ def _generate_report(
 
     click.echo("Generating report...")
     logger.debug("Output path: %s", output_path)
-    result = pp.qc_report(ds, output_path, sdrf_path=sdrf_path)
+    result = _qc_report(ds, output_path, sdrf_path=sdrf_path)
     click.echo(f"  Report saved to {result}")
     return result
 
@@ -155,6 +168,9 @@ def main() -> None:
     "--split", is_flag=True, default=False, help="Output individual plot HTML files instead of a single report."
 )
 @click.option("--sdrf", default=None, type=click.Path(exists=True), help="Path to SDRF TSV file for volcano plots.")
+@click.option(
+    "--no-border/--border", default=True, help="Remove card borders from split plot files (default: no border)."
+)
 @click.option("-v", "--verbose", is_flag=True, default=False, help="Enable verbose logging output.")
 def report(
     input_file: str | None,
@@ -163,6 +179,7 @@ def report(
     platform: str | None,
     split: bool,
     sdrf: str | None,
+    no_border: bool,
     verbose: bool,
 ) -> None:
     """Generate a QC report from a data file or PAD accession."""
@@ -176,7 +193,7 @@ def report(
         click.echo("Error: Provide either an input file or --accession, not both.", err=True)
         sys.exit(1)
 
-    output_path = Path(output) if output else None
+    output_path = Path(output) if output else Path(".")
     sdrf_path = Path(sdrf) if sdrf else None
 
     if accession is not None:
@@ -189,16 +206,21 @@ def report(
 
             for f in files:
                 try:
-                    out = output_path if output_path and len(files) == 1 else None
-                    if out is None:
-                        stem = f.stem
-                        if stem.endswith(".npx") or stem.endswith(".ct"):
-                            stem = Path(stem).stem
-                        if split:
-                            out = Path(f"{accession}_{stem}_qc_plots")
-                        else:
-                            out = Path(f"{accession}_{stem}_qc_report.html")
-                    _generate_report(f, out, platform=platform, split=split, sdrf_path=sdrf_path)
+                    stem = f.stem
+                    if stem.endswith(".npx") or stem.endswith(".ct"):
+                        stem = Path(stem).stem
+                    if split:
+                        out = Path(f"{output_path}/{stem}")
+                    else:
+                        out = Path(f"{output_path}/{stem}.html")
+                    _generate_report(
+                        f,
+                        out,
+                        platform=platform,
+                        split=split,
+                        sdrf_path=sdrf_path,
+                        no_border=no_border,
+                    )
                 except Exception as e:
                     logger.debug("Error processing %s: %s", f.name, e, exc_info=True)
                     click.echo(f"  Skipping {f.name}: {e}", err=True)
@@ -207,11 +229,19 @@ def report(
         if not input_path.exists():
             click.echo(f"Error: File not found: {input_path}", err=True)
             sys.exit(1)
-        _generate_report(input_path, output_path, platform=platform, split=split, sdrf_path=sdrf_path)
+        _generate_report(
+            input_path,
+            output_path,
+            platform=platform,
+            split=split,
+            sdrf_path=sdrf_path,
+            no_border=no_border,
+        )
 
 
 @main.command("proteins-above-lod")
-@click.argument("input_file")
+@click.argument("input_file", required=False, default=None)
+@click.option("-a", "--accession", default=None, help="PAD accession to download from PRIDE (e.g. PAD000001).")
 @click.option("-o", "--output", default=None, help="Output file path (default: print to stdout).")
 @click.option(
     "-p",
@@ -229,32 +259,153 @@ def report(
 )
 @click.option("-v", "--verbose", is_flag=True, default=False, help="Enable verbose logging output.")
 def proteins_above_lod(
-    input_file: str, output: str | None, platform: str | None, threshold: float, verbose: bool
+    input_file: str | None,
+    accession: str | None,
+    output: str | None,
+    platform: str | None,
+    threshold: float,
+    verbose: bool,
 ) -> None:
     """List UniProt accessions for proteins above LOD."""
     _setup_logging(verbose)
 
-    import pyprideap as pp
-
-    input_path = Path(input_file)
-    if not input_path.exists():
-        click.echo(f"Error: File not found: {input_path}", err=True)
+    if input_file is None and accession is None:
+        click.echo("Error: Provide either an input file or --accession / -a.", err=True)
         sys.exit(1)
 
-    click.echo(f"Reading {input_path.name}...", err=True)
-    ds = pp.read(input_path, platform=platform)
-    click.echo(
-        f"  {len(ds.samples)} samples, {len(ds.features)} features ({ds.platform.value})",
-        err=True,
-    )
+    if input_file is not None and accession is not None:
+        click.echo("Error: Provide either an input file or --accession, not both.", err=True)
+        sys.exit(1)
 
-    proteins = pp.get_proteins_above_lod(ds, threshold=threshold)
-    click.echo(f"  {len(proteins)} proteins above LOD (threshold={threshold}%)", err=True)
+    all_proteins: set[str] = set()
 
-    output_text = "\n".join(proteins)
+    if accession is not None:
+        accession = accession.upper()
+        click.echo(f"Fetching data from PRIDE for {accession}...", err=True)
+
+        with tempfile.TemporaryDirectory(prefix="pyprideap_") as tmpdir:
+            tmppath = Path(tmpdir)
+            files = _download_pad_files(accession, tmppath)
+
+            for f in files:
+                try:
+                    click.echo(f"Reading {f.name}...", err=True)
+                    ds = _read(f, platform=platform)
+                    click.echo(
+                        f"  {len(ds.samples)} samples, {len(ds.features)} features ({ds.platform.value})",
+                        err=True,
+                    )
+                    proteins = _get_proteins_above_lod(ds, threshold=threshold)
+                    click.echo(f"  {len(proteins)} proteins above LOD (threshold={threshold}%)", err=True)
+                    all_proteins.update(proteins)
+                except Exception as e:
+                    logger.debug("Error processing %s: %s", f.name, e, exc_info=True)
+                    click.echo(f"  Skipping {f.name}: {e}", err=True)
+    else:
+        input_path = Path(input_file)  # type: ignore[arg-type]
+        if not input_path.exists():
+            click.echo(f"Error: File not found: {input_path}", err=True)
+            sys.exit(1)
+
+        click.echo(f"Reading {input_path.name}...", err=True)
+        ds = _read(input_path, platform=platform)
+        click.echo(
+            f"  {len(ds.samples)} samples, {len(ds.features)} features ({ds.platform.value})",
+            err=True,
+        )
+        proteins = _get_proteins_above_lod(ds, threshold=threshold)
+        click.echo(f"  {len(proteins)} proteins above LOD (threshold={threshold}%)", err=True)
+        all_proteins.update(proteins)
+
+    output_text = "\n".join(sorted(all_proteins))
     if output:
         Path(output).write_text(output_text + "\n")
-        click.echo(f"  Saved to {output}", err=True)
+        click.echo(f"  Saved {len(all_proteins)} unique proteins to {output}", err=True)
+    else:
+        click.echo(output_text)
+
+
+@main.command("unique-samples")
+@click.argument("input_file", required=False, default=None)
+@click.option("-a", "--accession", default=None, help="PAD accession to download from PRIDE (e.g. PAD000001).")
+@click.option("-o", "--output", default=None, help="Output file path (default: print to stdout).")
+@click.option(
+    "-p",
+    "--platform",
+    type=click.Choice(["olink", "somascan"], case_sensitive=False),
+    default=None,
+    help="Force platform type (default: auto-detect).",
+)
+@click.option(
+    "--exclude-controls",
+    is_flag=True,
+    default=False,
+    help="Exclude control/QC samples (default: include all).",
+)
+@click.option("-v", "--verbose", is_flag=True, default=False, help="Enable verbose logging output.")
+def unique_samples(
+    input_file: str | None,
+    accession: str | None,
+    output: str | None,
+    platform: str | None,
+    exclude_controls: bool,
+    verbose: bool,
+) -> None:
+    """List unique sample identifiers in a dataset."""
+    _setup_logging(verbose)
+
+    if input_file is None and accession is None:
+        click.echo("Error: Provide either an input file or --accession / -a.", err=True)
+        sys.exit(1)
+
+    if input_file is not None and accession is not None:
+        click.echo("Error: Provide either an input file or --accession, not both.", err=True)
+        sys.exit(1)
+
+    all_samples: set[str] = set()
+
+    if accession is not None:
+        accession = accession.upper()
+        click.echo(f"Fetching data from PRIDE for {accession}...", err=True)
+
+        with tempfile.TemporaryDirectory(prefix="pyprideap_") as tmpdir:
+            tmppath = Path(tmpdir)
+            files = _download_pad_files(accession, tmppath)
+
+            for f in files:
+                try:
+                    click.echo(f"Reading {f.name}...", err=True)
+                    ds = _read(f, platform=platform)
+                    click.echo(
+                        f"  {len(ds.samples)} samples, {len(ds.features)} features ({ds.platform.value})",
+                        err=True,
+                    )
+                    samples = _get_unique_samples(ds, exclude_controls=exclude_controls)
+                    click.echo(f"  {len(samples)} unique samples", err=True)
+                    all_samples.update(samples)
+                except Exception as e:
+                    logger.debug("Error processing %s: %s", f.name, e, exc_info=True)
+                    click.echo(f"  Skipping {f.name}: {e}", err=True)
+    else:
+        input_path = Path(input_file)  # type: ignore[arg-type]
+        if not input_path.exists():
+            click.echo(f"Error: File not found: {input_path}", err=True)
+            sys.exit(1)
+
+        click.echo(f"Reading {input_path.name}...", err=True)
+        ds = _read(input_path, platform=platform)
+        click.echo(
+            f"  {len(ds.samples)} samples, {len(ds.features)} features ({ds.platform.value})",
+            err=True,
+        )
+        samples = _get_unique_samples(ds, exclude_controls=exclude_controls)
+        click.echo(f"  {len(samples)} unique samples", err=True)
+        all_samples.update(samples)
+
+    output_text = "\n".join(sorted(all_samples))
+    if output:
+        Path(output).write_text(output_text + "\n")
+        click.echo(f"  Saved {len(all_samples)} unique samples to {output}", err=True)
     else:
         click.echo(output_text)
 

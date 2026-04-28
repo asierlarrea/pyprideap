@@ -88,7 +88,7 @@ class DataCompletenessData:
     below_lod_rate: list[float]  # per-sample fraction below LOD (0-1)
     protein_ids: list[str] = field(default_factory=list)  # per-protein identifiers
     missing_freq: list[float] = field(default_factory=list)  # per-protein fraction below LOD (0-1)
-    title: str = "Data Completeness"
+    title: str = "Sample Completeness"
 
 
 @dataclass
@@ -110,6 +110,7 @@ class VolcanoData:
     significant: list[bool]
     direction: list[str]  # "up", "down", "ns"
     title: str = "Volcano Plot"
+    method: str = ""  # e.g. "Welch t-test", "Linear model (adjusted for age, sex)"
 
 
 @dataclass
@@ -640,7 +641,10 @@ def compute_correlation(dataset: AffinityDataset, max_samples: int = 50) -> Corr
         dist = dist.fillna(1.0)
 
         # Ensure symmetry and zero diagonal for squareform
-        np.fill_diagonal(dist.values, 0.0)
+        dist = dist.copy()
+        diag_vals = dist.values.copy()
+        np.fill_diagonal(diag_vals, 0.0)
+        dist = pd.DataFrame(diag_vals, index=dist.index, columns=dist.columns)
         dist = (dist + dist.T) / 2.0
 
         if dist.shape[0] > 2:

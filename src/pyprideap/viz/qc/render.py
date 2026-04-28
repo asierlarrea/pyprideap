@@ -75,7 +75,6 @@ def render_distribution(data: DistributionData) -> Figure:
     of individual traces for clearer visualization.
     """
     go, _ = _import_plotly()
-    import numpy as np
 
     n_samples = len(data.sample_ids)
 
@@ -289,7 +288,12 @@ def render_lod_analysis(data: LodAnalysisData) -> Figure:
     unit = getattr(data, "unit", "NPX")
     fig.update_xaxes(title_text="Protein Rank (by detectability)")
     fig.update_yaxes(title_text=f"% Samples with {unit} > LOD")
-    fig.update_layout(title=data.title, height=500, legend=dict(orientation="h", yanchor="bottom", y=-0.15))
+    fig.update_layout(
+        title=data.title,
+        height=500,
+        legend=dict(orientation="h", yanchor="top", y=-0.18),
+        margin=dict(b=100),
+    )
     return fig
 
 
@@ -576,7 +580,7 @@ def render_data_completeness(data: DataCompletenessData) -> Figure:
     fig = make_subplots(
         rows=2,
         cols=1,
-        subplot_titles=["Per-Sample Data Completeness", "Missing Frequency Distribution"],
+        subplot_titles=["Sample Completeness", "Missing Frequency"],
         vertical_spacing=0.35,
     )
 
@@ -633,7 +637,96 @@ def render_data_completeness(data: DataCompletenessData) -> Figure:
     fig.update_layout(
         title=data.title,
         height=800,
-        legend=dict(orientation="h", yanchor="bottom", y=-0.15),
+        legend=dict(orientation="h", yanchor="top", y=-0.18),
+        margin=dict(b=100),
+    )
+    return fig
+
+
+def render_sample_completeness(data: DataCompletenessData) -> Figure:
+    """Per-sample stacked bar showing above/below LOD as standalone plot."""
+    go, _ = _import_plotly()
+
+    _MAX_LABEL = 20
+    short_ids = [s if len(s) <= _MAX_LABEL else s[:_MAX_LABEL] + "\u2026" for s in data.sample_ids]
+
+    fig = go.Figure()
+    fig.add_trace(
+        go.Bar(
+            x=short_ids,
+            y=[r * 100 for r in data.above_lod_rate],
+            name="Above LOD",
+            marker_color="#2ecc71",
+            customdata=data.sample_ids,
+            hovertemplate="%{customdata}<br>Above LOD: %{y:.1f}%<extra></extra>",
+        ),
+    )
+    fig.add_trace(
+        go.Bar(
+            x=short_ids,
+            y=[r * 100 for r in data.below_lod_rate],
+            name="Below LOD",
+            marker_color="#f39c12",
+            customdata=data.sample_ids,
+            hovertemplate="%{customdata}<br>Below LOD: %{y:.1f}%<extra></extra>",
+        ),
+    )
+    fig.update_xaxes(title_text="", tickangle=-45)
+    fig.update_yaxes(title_text="% of Proteins", range=[0, 100], ticksuffix="%")
+    fig.update_layout(
+        title="Sample Completeness",
+        barmode="stack",
+        height=500,
+        legend=dict(orientation="h", yanchor="top", y=-0.18),
+        margin=dict(b=100),
+    )
+    return fig
+
+
+def render_missing_frequency(data: DataCompletenessData) -> Figure:
+    """Per-protein missing frequency histogram as standalone plot."""
+    go, _ = _import_plotly()
+
+    fig = go.Figure()
+    if data.missing_freq:
+        missing_pct = [f * 100 for f in data.missing_freq]
+        fig.add_trace(
+            go.Histogram(
+                x=missing_pct,
+                nbinsx=25,
+                marker_color="#e74c3c",
+                showlegend=False,
+            ),
+        )
+        n_below_30 = sum(1 for f in data.missing_freq if f < 0.30)
+        pct_below_30 = n_below_30 / len(data.missing_freq) * 100 if data.missing_freq else 0
+        fig.add_annotation(
+            text=f"{pct_below_30:.1f}% of proteins below 30% missing",
+            xref="paper",
+            yref="paper",
+            x=0.98,
+            y=0.98,
+            xanchor="right",
+            yanchor="top",
+            showarrow=False,
+            font=dict(size=12),
+            bgcolor="rgba(255,255,255,0.8)",
+        )
+        fig.add_vline(
+            x=30,
+            line_dash="dash",
+            line_color="#e67e22",
+            line_width=2,
+            annotation_text="30% threshold",
+            annotation_position="bottom right",
+            annotation_font_color="#e67e22",
+        )
+    fig.update_xaxes(title_text="Missing Frequency (% Samples Below LOD)", range=[0, 100])
+    fig.update_yaxes(title_text="Number of Proteins")
+    fig.update_layout(
+        title="Missing Frequency Distribution",
+        height=500,
+        margin=dict(b=100),
     )
     return fig
 
@@ -727,7 +820,8 @@ def render_plate_cv(data: PlateCvData) -> Figure:
     fig.update_layout(
         title=data.title,
         height=800,
-        legend=dict(orientation="h", yanchor="bottom", y=-0.1),
+        legend=dict(orientation="h", yanchor="top", y=-0.18),
+        margin=dict(b=100),
     )
     return fig
 
@@ -1141,8 +1235,9 @@ def render_col_check(data: ColCheckData) -> Figure:
             xaxis_title="Analyte rank (sorted by QC ratio)",
             yaxis_title="Calibrator QC Ratio",
             xaxis=dict(showticklabels=False),
-            legend=dict(orientation="h", yanchor="bottom", y=-0.15),
+            legend=dict(orientation="h", yanchor="top", y=-0.18),
             height=450,
+            margin=dict(b=100),
         )
     else:
         # Fallback: simple text summary if no ratio data
@@ -1266,7 +1361,8 @@ def render_norm_scale_boxplot(data: NormScaleBoxplotData) -> Figure:
     fig.update_layout(
         title=data.title,
         height=max(400, 300 * n_cols),
-        legend=dict(orientation="h", yanchor="bottom", y=-0.15),
+        legend=dict(orientation="h", yanchor="top", y=-0.18),
+        margin=dict(b=100),
     )
     return fig
 
@@ -1364,7 +1460,8 @@ def render_iqr_median_qc(data: IqrMedianQcData) -> Figure:
     fig.update_layout(
         title=f"{data.title} ({data.n_outlier_samples} outlier samples / {data.n_total_samples} total)",
         height=max(400, 350 * n_rows),
-        legend=dict(orientation="h", yanchor="bottom", y=-0.15),
+        legend=dict(orientation="h", yanchor="top", y=-0.18),
+        margin=dict(b=100),
     )
     return fig
 
@@ -1393,11 +1490,7 @@ def render_uniprot_duplicates(data: UniProtDuplicateData) -> Figure:
         marker_color="#2ecc71",
         text=[f"{pct_unique:.1f}%"],
         textposition="inside",
-        hovertemplate=(
-            "Unique proteins:<br>"
-            f"{n_unique} / {n_total} assays<br>"
-            "%{y:.1f}% of assays<extra></extra>"
-        ),
+        hovertemplate=(f"Unique proteins:<br>{n_unique} / {n_total} assays<br>%{{y:.1f}}% of assays<extra></extra>"),
     )
     fig.add_bar(
         x=["Assays"],
@@ -1414,14 +1507,12 @@ def render_uniprot_duplicates(data: UniProtDuplicateData) -> Figure:
     )
 
     fig.update_layout(
-        title=(
-            f"{data.title} — {n_unique} unique proteins, {n_total} assays "
-            f"({n_replicate} replicate assays)"
-        ),
+        title=(f"{data.title} — {n_unique} unique proteins, {n_total} assays ({n_replicate} replicate assays)"),
         barmode="stack",
         yaxis_title="% of Assays",
         yaxis=dict(range=[0, 100], ticksuffix="%"),
-        legend=dict(orientation="h", yanchor="bottom", y=-0.15, xanchor="center", x=0.5),
+        legend=dict(orientation="h", yanchor="top", y=-0.18, xanchor="center", x=0.5),
+        margin=dict(b=100),
     )
     return fig
 
@@ -1506,6 +1597,24 @@ def render_volcano(data: VolcanoData) -> Figure:
         )
 
     set_plot_theme(fig)
+
+    # Add method annotation if available
+    annotations = []
+    if data.method:
+        annotations.append(
+            dict(
+                text=f"Method: {data.method}",
+                xref="paper",
+                yref="paper",
+                x=0.0,
+                y=1.02,
+                xanchor="left",
+                yanchor="bottom",
+                showarrow=False,
+                font=dict(size=11, color=PRIDE_COLORS["text_muted"]),
+            )
+        )
+
     fig.update_layout(
         title=dict(text=data.title, x=0.5, xanchor="center"),
         xaxis_title="Fold Change",
@@ -1525,6 +1634,7 @@ def render_volcano(data: VolcanoData) -> Figure:
             x=0.5,
         ),
         margin=dict(l=60, r=30, t=60, b=80),
+        annotations=annotations,
     )
     return fig
 
@@ -1667,6 +1777,7 @@ def render_bridgeability(data: BridgeabilityData) -> Figure:
     fig.update_layout(
         title=f"{data.title}: {data.product1_name} vs {data.product2_name}",
         height=800,
-        legend=dict(orientation="h", yanchor="bottom", y=-0.12),
+        legend=dict(orientation="h", yanchor="top", y=-0.18),
+        margin=dict(b=100),
     )
     return fig
