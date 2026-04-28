@@ -26,6 +26,9 @@ from pyprideap.viz.qc.compute import (
     UniProtDuplicateData,
     VolcanoData,
     compute_all,
+    compute_data_completeness,
+    compute_lod_analysis,
+    compute_qc_summary,
     compute_volcano,
 )
 
@@ -74,8 +77,18 @@ _HELP_TEXT: dict[str, str] = {
         "(orange, measured but below detection limit). A sample with a large orange fraction may "
         "indicate low protein input or technical issues. "
         "<strong>Bottom:</strong> Missing Frequency distribution — a histogram of per-protein missing rate "
-        "(%% of samples where signal is below LOD). Olink recommends a missing frequency threshold "
-        "of 30%%: proteins above this threshold may be unreliable and should be considered for filtering. "
+        "(%% of samples where signal is below LOD). Proteins clustered near 0%% are reliably detected; "
+        "those near 100%% may need filtering."
+    ),
+    "sample_completeness": (
+        "Per-sample stacked bar showing Above LOD (green, reliable signal) vs Below LOD "
+        "(orange, measured but below detection limit). Control samples are excluded. "
+        "A sample with a large orange fraction may indicate low protein input or technical issues."
+    ),
+    "missing_frequency_distribution": (
+        "Histogram of per-protein missing rate (%% of samples where signal is below LOD). "
+        "Olink recommends a missing frequency threshold of 30%%: proteins above this threshold "
+        "may be unreliable and should be considered for filtering. "
         "Proteins clustered near 0%% are reliably detected; those near 100%% may need filtering."
     ),
     "dimreduction": (
@@ -204,11 +217,12 @@ _HELP_TEXT: dict[str, str] = {
 _SECTION_ORDER = [
     ("Quality Overview", ["lod_comparison", "qc_summary"]),
     ("Signal & Distribution", ["distribution", "lod_analysis"]),
-    ("Data Completeness", ["data_completeness"]),
+    ("Sample Completeness", ["sample_completeness"]),
+    ("Missing Frequency Distribution", ["missing_frequency_distribution"]),
     ("Sample Relationships", ["dimreduction", "correlation", "heatmap"]),
     ("Normalization QC", ["norm_scale"]),
     ("Variability", ["cv_distribution", "plate_cv"]),
-    ("Olink QC", ["iqr_median_qc", "uniprot_duplicates"]),
+    ("Assay QC", ["iqr_median_qc", "uniprot_duplicates"]),
     ("SomaScan QC", ["col_check"]),
     ("Differential Expression", ["differential_expression"]),
 ]
@@ -509,6 +523,31 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         });
     };
+    // LOD method switching (Olink only; only present when multiple LOD sources exist)
+    window.switchLodMethod = function(method) {
+        try { window.localStorage.setItem('pride-lod-method', method); } catch (e) {}
+        document.querySelectorAll('[data-lod-method-panel=\"true\"]').forEach(function(el) {
+            var m = el.getAttribute('data-lod-method');
+            el.style.display = (m === method) ? '' : 'none';
+            if (m === method) {
+                el.querySelectorAll('.plotly-graph-div').forEach(function(plotDiv) {
+                    if (plotDiv && window.Plotly) { window.Plotly.Plots.resize(plotDiv); }
+                });
+            }
+        });
+    };
+    // Initialise LOD method from saved preference (if dropdown exists)
+    var lodSelect = document.getElementById('lod-method-select');
+    if (lodSelect) {
+        var saved = null;
+        try { saved = window.localStorage.getItem('pride-lod-method'); } catch (e) {}
+        if (saved) {
+            for (var i = 0; i < lodSelect.options.length; i++) {
+                if (lodSelect.options[i].value === saved) { lodSelect.value = saved; break; }
+            }
+        }
+        window.switchLodMethod(lodSelect.value);
+    }
     // PRIDE iframe embedding
     if (window.self !== window.top) {
         document.body.classList.add('pride-embedded');
@@ -586,7 +625,18 @@ def _compact_fig(fig: Any, precision: int = 4) -> Any:
 
 
 def _lod_source_info(dataset: AffinityDataset) -> dict[str, Any]:
-    """Detect which LOD sources are available and which one is active."""
+    """Detect which LOD sources are available and which one is active.
+
+    For Olink datasets we consider three possible sources (Reported LOD,
+    NCLOD, FixedLOD) and pick the first available in that priority order.
+
+    For SomaScan datasets, the primary and typically only source is the
+    estimated LOD from buffer samples (eLOD). SomaScan ADAT files do not
+    usually contain per-sample reported LOD values and there is no
+    FixedLOD reference CSV equivalent; instead, LOD is derived from the
+    distribution of buffer RFU values.
+    """
+    from pyprideap.core import Platform
     from pyprideap.processing.lod import (
         _MIN_CONTROLS_FOR_LOD,
         _find_negative_controls,
@@ -597,62 +647,8 @@ def _lod_source_info(dataset: AffinityDataset) -> dict[str, Any]:
     info: dict[str, Any] = {"active": None, "sources": []}
     sources: list[dict[str, str]] = []
 
-    # 1. Reported LOD
-    reported = get_reported_lod(dataset)
-    if reported is not None:
-        if hasattr(reported, "shape") and reported.ndim == 2:
-            n_assays = int(reported.notna().any(axis=0).sum())
-        else:
-            n_assays = int(reported.notna().sum())
-        sources.append(
-            {
-                "name": "Reported LOD",
-                "status": "available",
-                "detail": f"LOD column in NPX file ({n_assays} assays)",
-            }
-        )
-        if info["active"] is None:
-            info["active"] = "Reported LOD"
-    else:
-        sources.append({"name": "Reported LOD", "status": "unavailable", "detail": "No LOD column in data file"})
-
-    # 2. NCLOD from negative controls
-    try:
-        nc_mask = _find_negative_controls(dataset)
-        n_controls = int(nc_mask.sum())
-        if n_controls >= _MIN_CONTROLS_FOR_LOD:
-            sources.append(
-                {
-                    "name": "NCLOD",
-                    "status": "available",
-                    "detail": f"Computed from {n_controls} negative control samples",
-                }
-            )
-            if info["active"] is None:
-                info["active"] = "NCLOD"
-        else:
-            sources.append(
-                {
-                    "name": "NCLOD",
-                    "status": "insufficient",
-                    "detail": f"Only {n_controls} negative controls (need \u2265{_MIN_CONTROLS_FOR_LOD})",
-                }
-            )
-    except (ValueError, KeyError):
-        has_st = "SampleType" in dataset.samples.columns
-        sources.append(
-            {
-                "name": "NCLOD",
-                "status": "unavailable",
-                "detail": "No SampleType column" if not has_st else "No negative control samples found",
-            }
-        )
-
-    # 3. Platform-specific LOD sources
-    from pyprideap.core import Platform
-
     if dataset.platform == Platform.SOMASCAN:
-        # SomaScan: eLOD from buffer samples (not FixedLOD)
+        # SomaScan: only consider eLOD from buffer samples.
         try:
             from pyprideap.processing.lod import compute_soma_elod
 
@@ -661,21 +657,72 @@ def _lod_source_info(dataset: AffinityDataset) -> dict[str, Any]:
                 {
                     "name": "eLOD",
                     "status": "available",
-                    "detail": "Computed from buffer samples (MAD formula)",
+                    "detail": "Estimated from buffer RFU using a robust MAD-based formula",
                 }
             )
-            if info["active"] is None:
-                info["active"] = "eLOD"
+            info["active"] = "eLOD"
         except (ValueError, KeyError, ImportError):
             sources.append(
                 {
                     "name": "eLOD",
                     "status": "unavailable",
-                    "detail": "No buffer samples found for eLOD computation",
+                    "detail": "No buffer samples (SampleType = 'Buffer') found for eLOD computation",
                 }
             )
     else:
-        # Olink: FixedLOD from bundled configs
+        # Olink: Reported LOD, NCLOD, and FixedLOD
+        # 1. Reported LOD
+        reported = get_reported_lod(dataset)
+        if reported is not None:
+            if hasattr(reported, "shape") and reported.ndim == 2:
+                n_assays = int(reported.notna().any(axis=0).sum())
+            else:
+                n_assays = int(reported.notna().sum())
+            sources.append(
+                {
+                    "name": "Reported LOD",
+                    "status": "available",
+                    "detail": f"LOD column in NPX file ({n_assays} assays)",
+                }
+            )
+            if info["active"] is None:
+                info["active"] = "Reported LOD"
+        else:
+            sources.append({"name": "Reported LOD", "status": "unavailable", "detail": "No LOD column in data file"})
+
+        # 2. NCLOD from negative controls
+        try:
+            nc_mask = _find_negative_controls(dataset)
+            n_controls = int(nc_mask.sum())
+            if n_controls >= _MIN_CONTROLS_FOR_LOD:
+                sources.append(
+                    {
+                        "name": "NCLOD",
+                        "status": "available",
+                        "detail": f"Computed from {n_controls} negative control samples",
+                    }
+                )
+                if info["active"] is None:
+                    info["active"] = "NCLOD"
+            else:
+                sources.append(
+                    {
+                        "name": "NCLOD",
+                        "status": "insufficient",
+                        "detail": f"Only {n_controls} negative controls (need \u2265{_MIN_CONTROLS_FOR_LOD})",
+                    }
+                )
+        except (ValueError, KeyError):
+            has_st = "SampleType" in dataset.samples.columns
+            sources.append(
+                {
+                    "name": "NCLOD",
+                    "status": "unavailable",
+                    "detail": "No SampleType column" if not has_st else "No negative control samples found",
+                }
+            )
+
+        # 3. FixedLOD from bundled configs
         fixed_path = get_bundled_fixed_lod_path(dataset.platform)
         if fixed_path is not None:
             sources.append(
@@ -699,9 +746,11 @@ def _lod_source_info(dataset: AffinityDataset) -> dict[str, Any]:
     return info
 
 
-def _render_lod_card(lod_info: dict[str, Any]) -> str:
-    """Render the LOD source summary as an HTML card."""
-    status_icons = {"available": "\u2705", "unavailable": "\u274c", "insufficient": "\u26a0\ufe0f"}
+def _render_lod_card(lod_info: dict[str, Any], *, lod_methods: list[tuple[str, str]] | None = None) -> str:
+    """Render the LOD source summary as an HTML card.
+    Use HTML entities for status icons so the output is ASCII-safe for writing with any encoding.
+    """
+    status_icons = {"available": "&#9989;", "unavailable": "&#10060;", "insufficient": "&#9888;"}
     rows = []
     for src in lod_info["sources"]:
         icon = status_icons.get(src["status"], "")
@@ -718,33 +767,80 @@ def _render_lod_card(lod_info: dict[str, Any]) -> str:
     # Warning banner when no LOD source is available
     no_lod = lod_info["active"] is None
     warning_html = ""
+    platform = lod_info.get("platform", "")
     if no_lod:
-        has_fallback = any(
-            s["name"] in ("FixedLOD", "eLOD") and s["status"] == "available" for s in lod_info["sources"]
-        )
-        if has_fallback:
-            fallback_name = next(
-                s["name"]
-                for s in lod_info["sources"]
-                if s["name"] in ("FixedLOD", "eLOD") and s["status"] == "available"
-            )
-            warning_html = (
-                '<div style="background:#fff3cd;border:1px solid #ffc107;border-radius:6px;'
-                'padding:10px 14px;margin-top:10px;color:#856404;font-size:0.92em;">'
-                "\u26a0\ufe0f <strong>Warning:</strong> No Reported LOD or NCLOD available. "
-                "LOD-dependent plots (QC Summary, LOD Analysis) will not be shown. "
-                f"Consider using <strong>{fallback_name}</strong> for this platform."
-                "</div>"
-            )
-        else:
+        if platform == "somascan":
             warning_html = (
                 '<div style="background:#f8d7da;border:1px solid #f5c6cb;border-radius:6px;'
                 'padding:10px 14px;margin-top:10px;color:#721c24;font-size:0.92em;">'
-                "\u26a0\ufe0f <strong>Warning:</strong> No LOD source is available for this dataset. "
-                "No Reported LOD in the data file and insufficient negative controls for NCLOD. "
-                "LOD-dependent plots (QC Summary, LOD Analysis) will not be shown."
+                "&#9888; <strong>Warning:</strong> No buffer samples (SampleType = 'Buffer') found; "
+                "eLOD could not be computed. LOD-dependent plots (QC Summary, LOD Analysis) will not be shown."
                 "</div>"
             )
+        else:
+            has_fallback = any(
+                s["name"] in ("FixedLOD", "eLOD") and s["status"] == "available" for s in lod_info["sources"]
+            )
+            if has_fallback:
+                fallback_name = next(
+                    s["name"]
+                    for s in lod_info["sources"]
+                    if s["name"] in ("FixedLOD", "eLOD") and s["status"] == "available"
+                )
+                warning_html = (
+                    '<div style="background:#fff3cd;border:1px solid #ffc107;border-radius:6px;'
+                    'padding:10px 14px;margin-top:10px;color:#856404;font-size:0.92em;">'
+                    "&#9888; <strong>Warning:</strong> No Reported LOD or NCLOD available. "
+                    "LOD-dependent plots (QC Summary, LOD Analysis) will not be shown. "
+                    f"Consider using <strong>{fallback_name}</strong> for this platform."
+                    "</div>"
+                )
+            else:
+                warning_html = (
+                    '<div style="background:#f8d7da;border:1px solid #f5c6cb;border-radius:6px;'
+                    'padding:10px 14px;margin-top:10px;color:#721c24;font-size:0.92em;">'
+                    "&#9888; <strong>Warning:</strong> No LOD source is available for this dataset. "
+                    "No Reported LOD in the data file and insufficient negative controls for NCLOD. "
+                    "LOD-dependent plots (QC Summary, LOD Analysis) will not be shown."
+                    "</div>"
+                )
+
+    if platform == "somascan":
+        help_text = (
+            "The Limit of Detection (LOD) determines whether a measured RFU signal is distinguishable from background "
+            "buffer noise. For SomaScan, this report uses the <strong>estimated LOD (eLOD)</strong> computed from "
+            "buffer samples only. For each analyte, eLOD is defined as "
+            "<code>median(buffer RFU) + 3.3 &times; 1.4826 &times; MAD(buffer RFU)</code>, following the "
+            "SomaDataIO <code>calc_eLOD()</code> implementation. The 1.4826 factor converts MAD to a "
+            "standard-deviation equivalent; the 3.3 multiplier targets approximately 95% detection probability. "
+            "At least one group of buffer samples (SampleType = 'Buffer') is required for eLOD calculation; "
+            "Calibrator and QC samples are <em>not</em> used as background."
+        )
+    else:
+        help_text = (
+            "The Limit of Detection (LOD) determines whether a measured protein signal is above background noise. "
+            "Three LOD sources are supported for Olink datasets: "
+            "<strong>Reported LOD</strong> comes from the LOD column in the original NPX file (per sample and assay). "
+            "<strong>NCLOD</strong> is computed from negative control samples using the formula "
+            "LOD = median(NC) + max(0.2, 3&times;SD(NC)), following the OlinkAnalyze R package and requiring "
+            "&ge;10 negative controls. "
+            "<strong>FixedLOD</strong> is a pre-computed reference from Olink, specific to the reagent lot and "
+            "Data Analysis Reference ID."
+        )
+
+    selector_html = ""
+    if lod_methods is not None and len(lod_methods) > 1:
+        options = "".join(
+            f'<option value="{html_mod.escape(key)}">{html_mod.escape(label)}</option>' for key, label in lod_methods
+        )
+        selector_html = (
+            '<div style="margin-top:10px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">'
+            "<label for='lod-method-select'><strong>LOD method for LOD-dependent plots:</strong></label>"
+            f"<select id='lod-method-select' onchange='switchLodMethod(this.value)'>"
+            f"{options}"
+            "</select>"
+            "</div>"
+        )
 
     return (
         '<div class="plot-card" id="lod-sources" style="margin-bottom:24px;">'
@@ -752,30 +848,12 @@ def _render_lod_card(lod_info: dict[str, Any]) -> str:
         "<h3>LOD Sources</h3>"
         '<button class="help-toggle" title="About LOD sources" aria-label="Help">?</button>'
         "</div>"
-        '<div class="help-text">'
-        "The Limit of Detection (LOD) determines whether a measured protein signal is above background noise. "
-        + (
-            "Three LOD sources are supported: "
-            "<strong>Reported LOD</strong> comes from the LOD column in the original data file (per sample and assay). "
-            "<strong>NCLOD</strong> is computed from negative control samples using the formula "
-            "LOD = median(NC) + max(0.2, 3&times;SD(NC)). Requires &ge;10 negative controls. "
-            "<strong>eLOD</strong> is computed from buffer samples using a MAD-based formula. "
-            "The report uses the first available source (Reported &gt; NCLOD &gt; eLOD)."
-            if lod_info.get("platform") == "somascan"
-            else "Three LOD sources are supported: "
-            "<strong>Reported LOD</strong> comes from the LOD column in the original NPX file (per sample and assay). "
-            "<strong>NCLOD</strong> is computed from negative control samples using the formula "
-            "LOD = median(NC) + max(0.2, 3&times;SD(NC)), following the OlinkAnalyze R package. "
-            "Requires &ge;10 negative controls. "
-            "<strong>FixedLOD</strong> is a pre-computed reference from Olink, specific to the reagent lot and "
-            "Data Analysis Reference ID. "
-            "The report uses the first available source (Reported &gt; NCLOD &gt; FixedLOD)."
-        )
-        + "</div>"
+        f'<div class="help-text">{help_text}</div>'
         '<table style="width:100%;border-collapse:collapse;margin-top:8px;">'
         f"{''.join(rows)}"
         "</table>"
         f"{warning_html}"
+        f"{selector_html}"
         "</div>"
     )
 
@@ -858,21 +936,20 @@ def _render_summary_table(
 
     rows.append(_summary_row("", "Features (assays)", str(n_features)))
 
-    # QC columns available in the dataset
-    _known_qc_cols = [
-        "SampleQC",
-        "QC_Warning",
-        "AssayQC",
-        "SampleType",
-        "RowCheck",
-        "ColCheck",
-        "HybControlNormScale",
-    ]
-    qc_cols_found = [c for c in _known_qc_cols if c in samples.columns or c in features.columns]
-    if qc_cols_found:
-        rows.append(_summary_row("", "QC columns", ", ".join(qc_cols_found)))
-    else:
-        rows.append(_summary_row(_status_dot("amber"), "QC columns", "None detected — QC metrics may be limited"))
+    # --- LOD (right after General) ---
+    lod_active = lod_info.get("active")
+    lod_analysis = plot_data.get("lod_analysis")
+    data_completeness = plot_data.get("data_completeness")
+    has_any_lod = lod_active is not None or lod_analysis is not None or data_completeness is not None
+    if has_any_lod or lod_info.get("sources"):
+        rows.append(_summary_group("Limit of Detection"))
+
+        # Inline LOD sources overview
+        status_icons = {"available": "&#9989;", "unavailable": "&#10060;", "insufficient": "&#9888;"}
+        for src in lod_info.get("sources", []):
+            icon = status_icons.get(src["status"], "")
+            active_tag = " <strong>(active)</strong>" if src["name"] == lod_info.get("active") else ""
+            rows.append(_summary_row(icon, src["name"] + str(active_tag), src["detail"]))
 
     # --- Proteins ---
     rows.append(_summary_group("Proteins"))
@@ -890,81 +967,43 @@ def _render_summary_table(
     median_per_sample = float(proteins_per_sample.median())
     rows.append(_summary_row("", "Proteins per sample (median)", f"{median_per_sample:.0f}"))
 
-    # --- Missing Data ---
-    rows.append(_summary_group("Missing Data"))
-    total_cells = numeric.size
-    if total_cells > 0:
-        detection_rate = float(numeric.notna().sum().sum() / total_cells)
-    else:
-        detection_rate = 0.0
-    if detection_rate > 0.90:
-        dr_dot = _status_dot("green")
-    elif detection_rate >= 0.70:
-        dr_dot = _status_dot("amber")
-    else:
-        dr_dot = _status_dot("red")
-    rows.append(_summary_row(dr_dot, "Detection rate", f"{detection_rate:.1%}"))
+    # --- Missing Data (only when no LOD info, since LOD-based completeness is more informative) ---
+    if not has_any_lod:
+        rows.append(_summary_group("Missing Data"))
+        total_cells = numeric.size
+        if total_cells > 0:
+            detection_rate = float(numeric.notna().sum().sum() / total_cells)
+        else:
+            detection_rate = 0.0
+        if detection_rate > 0.90:
+            dr_dot = _status_dot("green")
+        elif detection_rate >= 0.70:
+            dr_dot = _status_dot("amber")
+        else:
+            dr_dot = _status_dot("red")
+        rows.append(_summary_row(dr_dot, "Detection rate", f"{detection_rate:.1%}"))
 
-    # Samples with >20% missing
-    row_miss = numeric.isna().mean(axis=1)
-    n_high_miss_samples = int((row_miss > 0.2).sum())
-    if n_high_miss_samples == 0:
-        hms_dot = _status_dot("green")
-    elif n_samples > 0 and n_high_miss_samples / n_samples <= 0.10:
-        hms_dot = _status_dot("amber")
-    else:
-        hms_dot = _status_dot("red")
-    rows.append(_summary_row(hms_dot, "Samples with &gt;20% missing", str(n_high_miss_samples)))
+        # Samples with >20% missing
+        row_miss = numeric.isna().mean(axis=1)
+        n_high_miss_samples = int((row_miss > 0.2).sum())
+        if n_high_miss_samples == 0:
+            hms_dot = _status_dot("green")
+        elif n_samples > 0 and n_high_miss_samples / n_samples <= 0.10:
+            hms_dot = _status_dot("amber")
+        else:
+            hms_dot = _status_dot("red")
+        rows.append(_summary_row(hms_dot, "Samples with &gt;20% missing", str(n_high_miss_samples)))
 
-    # Proteins with >50% missing
-    col_miss = numeric.isna().mean(axis=0)
-    n_high_miss_prot = int((col_miss > 0.5).sum())
-    if n_high_miss_prot == 0:
-        hmp_dot = _status_dot("green")
-    elif n_features > 0 and n_high_miss_prot / n_features <= 0.05:
-        hmp_dot = _status_dot("amber")
-    else:
-        hmp_dot = _status_dot("red")
-    rows.append(_summary_row(hmp_dot, "Proteins with &gt;50% missing", str(n_high_miss_prot)))
-
-    # --- LOD ---
-    lod_active = lod_info.get("active")
-    lod_analysis = plot_data.get("lod_analysis")
-    data_completeness = plot_data.get("data_completeness")
-    has_any_lod = lod_active is not None or lod_analysis is not None or data_completeness is not None
-    if has_any_lod:
-        rows.append(_summary_group("Limit of Detection"))
-        if lod_active is not None:
-            rows.append(_summary_row("", "LOD source", str(lod_active)))
-
-        if isinstance(lod_analysis, LodAnalysisData) and len(lod_analysis.above_lod_pct) > 0:
-            n_above = sum(1 for p in lod_analysis.above_lod_pct if p > 50)
-            n_total = len(lod_analysis.above_lod_pct)
-            frac_above = n_above / n_total
-            if frac_above > 0.80:
-                lod_dot = _status_dot("green")
-            elif frac_above >= 0.50:
-                lod_dot = _status_dot("amber")
-            else:
-                lod_dot = _status_dot("red")
-            rows.append(
-                _summary_row(
-                    lod_dot,
-                    "Assays above LOD in &gt;50% of samples",
-                    f"{n_above} / {n_total} ({frac_above:.1%})",
-                )
-            )
-
-        if isinstance(data_completeness, DataCompletenessData) and len(data_completeness.above_lod_rate) > 0:
-            overall_above = float(np.mean(data_completeness.above_lod_rate))
-            if overall_above > 0.75:
-                oa_dot = _status_dot("green")
-            elif overall_above >= 0.50:
-                oa_dot = _status_dot("amber")
-            else:
-                oa_dot = _status_dot("red")
-            rows.append(_summary_row(oa_dot, "Overall above-LOD rate", f"{overall_above:.1%}"))
-
+        # Proteins with >50% missing
+        col_miss = numeric.isna().mean(axis=0)
+        n_high_miss_prot = int((col_miss > 0.5).sum())
+        if n_high_miss_prot == 0:
+            hmp_dot = _status_dot("green")
+        elif n_features > 0 and n_high_miss_prot / n_features <= 0.05:
+            hmp_dot = _status_dot("amber")
+        else:
+            hmp_dot = _status_dot("red")
+        rows.append(_summary_row(hmp_dot, "Proteins with &gt;50% missing", str(n_high_miss_prot)))
     # --- Variability ---
     cv_data = plot_data.get("cv_distribution")
     plate_cv_data = plot_data.get("plate_cv")
@@ -998,22 +1037,6 @@ def _render_summary_table(
             else:
                 pi_dot = _status_dot("red")
             rows.append(_summary_row(pi_dot, "Median inter-plate CV", f"{med_inter:.1%}"))
-
-    # --- Expression ---
-    rows.append(_summary_group("Expression"))
-    vals = numeric.values.flatten()
-    vals_clean = vals[~np.isnan(vals)] if len(vals) > 0 else vals
-    if len(vals_clean) > 0:
-        med_expr = float(np.median(vals_clean))
-        dyn_range = float(np.max(vals_clean) - np.min(vals_clean))
-        sd_expr = float(np.std(vals_clean))
-        rows.append(_summary_row("", "Median expression", f"{med_expr:.2f}"))
-        rows.append(_summary_row("", "Dynamic range", f"{dyn_range:.2f}"))
-        rows.append(_summary_row("", "SD of expression", f"{sd_expr:.2f}"))
-    else:
-        rows.append(_summary_row("", "Median expression", "N/A"))
-        rows.append(_summary_row("", "Dynamic range", "N/A"))
-        rows.append(_summary_row("", "SD of expression", "N/A"))
 
     # --- QC Status (Olink only) ---
     if "SampleQC" in samples.columns:
@@ -1058,45 +1081,24 @@ def _render_summary_table(
     from pyprideap.core import Platform as _Platform
 
     iqr_median_data = plot_data.get("iqr_median_qc")
-    uniprot_dup_data = plot_data.get("uniprot_duplicates")
-    has_olink_qc = isinstance(iqr_median_data, IqrMedianQcData) or isinstance(uniprot_dup_data, UniProtDuplicateData)
-    if has_olink_qc:
-        rows.append(_summary_group("Olink QC"))
-
-        if isinstance(iqr_median_data, IqrMedianQcData):
-            n_outlier = iqr_median_data.n_outlier_samples
-            n_total = iqr_median_data.n_total_samples
-            outlier_rate = n_outlier / n_total if n_total > 0 else 0.0
-            if n_outlier == 0:
-                iqr_dot = _status_dot("green")
-            elif outlier_rate < 0.10:
-                iqr_dot = _status_dot("amber")
-            else:
-                iqr_dot = _status_dot("red")
-            rows.append(
-                _summary_row(
-                    iqr_dot,
-                    "IQR/Median outlier samples",
-                    f"{n_outlier} / {n_total}",
-                )
+    if isinstance(iqr_median_data, IqrMedianQcData):
+        rows.append(_summary_group("Assay QC"))
+        n_outlier = iqr_median_data.n_outlier_samples
+        n_total = iqr_median_data.n_total_samples
+        outlier_rate = n_outlier / n_total if n_total > 0 else 0.0
+        if n_outlier == 0:
+            iqr_dot = _status_dot("green")
+        elif outlier_rate < 0.10:
+            iqr_dot = _status_dot("amber")
+        else:
+            iqr_dot = _status_dot("red")
+        rows.append(
+            _summary_row(
+                iqr_dot,
+                "IQR/Median outlier samples",
+                f"{n_outlier} / {n_total}",
             )
-
-        if isinstance(uniprot_dup_data, UniProtDuplicateData):
-            n_affected = uniprot_dup_data.n_affected_assays
-            n_total_assays = uniprot_dup_data.n_total_assays
-            if n_affected == 0:
-                dup_dot = _status_dot("green")
-            elif n_total_assays > 0 and n_affected / n_total_assays < 0.05:
-                dup_dot = _status_dot("amber")
-            else:
-                dup_dot = _status_dot("red")
-            rows.append(
-                _summary_row(
-                    dup_dot,
-                    "UniProt duplicate assays",
-                    f"{n_affected} / {n_total_assays}",
-                )
-            )
+        )
 
     # --- SomaScan QC Flags ---
     if dataset.platform == _Platform.SOMASCAN:
@@ -1150,7 +1152,7 @@ def _compute_sdrf_volcanoes(
     from dataclasses import replace as ds_replace
 
     from pyprideap.io.readers.sdrf import get_grouping_columns, merge_sdrf, read_sdrf
-    from pyprideap.stats.differential import ttest
+    from pyprideap.stats.differential import linear_model, ttest
 
     sdrf = read_sdrf(sdrf_path)
     ds = merge_sdrf(dataset, sdrf)
@@ -1175,6 +1177,9 @@ def _compute_sdrf_volcanoes(
         groups = ds_clean.samples[col].dropna().unique()
         n_groups = len(groups)
 
+        # Detect potential numeric covariates from SDRF columns
+        covariates = _detect_covariates(ds_clean, exclude={col})
+
         comparisons: list[tuple[str, VolcanoData]] = []
 
         if n_groups == 2:
@@ -1182,9 +1187,28 @@ def _compute_sdrf_volcanoes(
             try:
                 test_df = ttest(ds_clean, group_var=col)
                 label = f"{groups[0]} vs {groups[1]}"
+                n_sig = int((test_df["significant"] == True).sum()) if "significant" in test_df.columns else 0  # noqa: E712
+                method = "Welch t-test"
+
+                # Fallback: if t-test found 0 significant proteins and
+                # covariates are available, re-run with linear model
+                if n_sig == 0 and covariates:
+                    cov_names = list(covariates.keys())
+                    logger.debug(
+                        "t-test found 0 significant proteins for '%s'; retrying with linear model adjusting for %s",
+                        col,
+                        cov_names,
+                    )
+                    try:
+                        test_df = linear_model(ds_clean, group_var=col, covariates=cov_names)
+                        method = f"Linear model (adjusted for {', '.join(cov_names)})"
+                    except Exception:
+                        pass  # keep the t-test result
+
                 vdata = compute_volcano(test_df)
                 if vdata is not None:
                     vdata.title = f"{col}: {label}"
+                    vdata.method = method
                     comparisons.append((label, vdata))
             except (ValueError, Exception):
                 pass
@@ -1202,9 +1226,28 @@ def _compute_sdrf_volcanoes(
                     try:
                         test_df = ttest(ds_pair, group_var=col)
                         label = f"{g1} vs {g2}"
+                        n_sig = int((test_df["significant"] == True).sum()) if "significant" in test_df.columns else 0  # noqa: E712
+                        method = "Welch t-test"
+
+                        if n_sig == 0 and covariates:
+                            cov_names = list(covariates.keys())
+                            logger.debug(
+                                "t-test found 0 significant proteins for '%s: %s'; "
+                                "retrying with linear model adjusting for %s",
+                                col,
+                                label,
+                                cov_names,
+                            )
+                            try:
+                                test_df = linear_model(ds_pair, group_var=col, covariates=cov_names)
+                                method = f"Linear model (adjusted for {', '.join(cov_names)})"
+                            except Exception:
+                                pass
+
                         vdata = compute_volcano(test_df)
                         if vdata is not None:
                             vdata.title = f"{col}: {label}"
+                            vdata.method = method
                             comparisons.append((label, vdata))
                     except (ValueError, Exception):
                         pass
@@ -1215,10 +1258,58 @@ def _compute_sdrf_volcanoes(
     return results
 
 
+def _detect_covariates(
+    dataset: AffinityDataset,
+    exclude: set[str],
+) -> dict[str, str]:
+    """Detect numeric covariates from SDRF-merged sample metadata.
+
+    Looks for columns like ``age`` (parses '55Y' -> 55) and ``sex``
+    (encodes as 0/1).  Returns a dict of {column_name: type} for
+    columns that were successfully coerced to numeric.
+    """
+    import pandas as pd
+
+    covariates: dict[str, str] = {}
+    samples = dataset.samples
+
+    for col in samples.columns:
+        col_lower = col.lower().strip()
+        if col in exclude or col_lower in exclude:
+            continue
+
+        if col_lower == "age":
+            # Parse age strings like "55Y", "62Y" -> numeric
+            try:
+                parsed = samples[col].astype(str).str.extract(r"(\d+)", expand=False)
+                numeric = pd.to_numeric(parsed, errors="coerce")
+                if numeric.notna().sum() >= len(samples) * 0.5:
+                    dataset.samples[col] = numeric
+                    covariates[col] = "numeric"
+            except Exception:
+                pass
+        elif col_lower == "sex":
+            # Encode sex as numeric (female=0, male=1)
+            try:
+                mapping = samples[col].astype(str).str.strip().str.lower()
+                unique_vals = set(mapping.dropna().unique()) - {"nan", "not available", "not applicable"}
+                if unique_vals <= {"female", "male"} and len(unique_vals) == 2:
+                    dataset.samples[col] = mapping.map({"female": 0, "male": 1})
+                    covariates[col] = "binary"
+            except Exception:
+                pass
+
+    if covariates:
+        logger.debug("Detected covariates for adjustment: %s", covariates)
+
+    return covariates
+
+
 def qc_report(
     dataset: AffinityDataset,
     output: str | Path,
     sdrf_path: str | Path | None = None,
+    strip_plot_title: bool = True,
 ) -> Path:
     """Generate a complete QC HTML report for the dataset.
 
@@ -1232,6 +1323,10 @@ def qc_report(
         Optional path to an SDRF TSV file.  When provided, differential
         expression volcano plots are added to the report with an
         interactive dropdown to select the grouping variable.
+    strip_plot_title : bool
+        Remove the Plotly figure title from each plot (default ``True``).
+        The card header already displays the title, so the in-plot title
+        is redundant.  Set to ``False`` to keep the Plotly title.
     """
     try:
         import plotly  # noqa: F401
@@ -1244,6 +1339,39 @@ def qc_report(
     logger.debug("qc_report: starting report generation -> %s", output)
     plot_data = compute_all(dataset)
 
+    # For Olink datasets, allow switching LOD method inside a single HTML report.
+    # We render LOD-dependent plots once per available method and toggle visibility via JS.
+    lod_methods: list[tuple[str, str]] = []  # (method_key, human_label)
+    lod_by_method: dict[str, Any] = {}
+    try:
+        from pyprideap.core import Platform
+        from pyprideap.processing.lod import LodMethod, get_lod_values
+
+        if dataset.platform != Platform.SOMASCAN:
+            candidates: list[tuple[LodMethod, str]] = [
+                (LodMethod.REPORTED, "Reported LOD"),
+                (LodMethod.NCLOD, "NCLOD"),
+                (LodMethod.FIXED, "FixedLOD"),
+            ]
+            for m, label in candidates:
+                lod_val = get_lod_values(dataset, m)
+                if lod_val is None:
+                    continue
+                try:
+                    has_any = bool(lod_val.notna().any().any()) if hasattr(lod_val, "ndim") and lod_val.ndim == 2 else bool(
+                        lod_val.notna().any()
+                    )
+                except Exception:
+                    has_any = True
+                if not has_any:
+                    continue
+                lod_methods.append((m.value, label))
+                lod_by_method[m.value] = lod_val
+    except Exception:
+        # If anything goes wrong, fall back to the existing auto-resolved behaviour.
+        lod_methods = []
+        lod_by_method = {}
+
     _RENDERERS = {
         "lod_comparison": (LodComparisonData, R.render_lod_comparison),
         "distribution": (DistributionData, R.render_distribution),
@@ -1251,7 +1379,8 @@ def qc_report(
         "lod_analysis": (LodAnalysisData, R.render_lod_analysis),
         "heatmap": (HeatmapData, R.render_heatmap),
         "correlation": (CorrelationData, R.render_correlation),
-        "data_completeness": (DataCompletenessData, R.render_data_completeness),
+        "sample_completeness": (DataCompletenessData, R.render_sample_completeness),
+        "missing_frequency_distribution": (DataCompletenessData, R.render_missing_frequency),
         "cv_distribution": (CvDistributionData, R.render_cv_distribution),
         "plate_cv": (PlateCvData, R.render_plate_cv),
         "norm_scale": (NormScaleData, R.render_norm_scale),
@@ -1272,6 +1401,12 @@ def qc_report(
     rendered: dict[str, tuple[str, ...]] = {}  # key -> (title, html[, extra_header])
     first_key = None
 
+    # Map split renderer keys to their compute_all data keys
+    _DATA_KEY_MAP = {
+        "sample_completeness": "data_completeness",
+        "missing_frequency_distribution": "data_completeness",
+    }
+
     # Handle combined dimensionality reduction (PCA + t-SNE in one panel with toggle)
     _pca_raw = plot_data.get("pca")
     _umap_raw = plot_data.get("umap")  # actually t-SNE data
@@ -1284,7 +1419,8 @@ def qc_report(
             if key == "dimreduction":
                 first_key = "dimreduction"
                 break
-            if key in _RENDERERS and plot_data.get(key) is not None:
+            dk = _DATA_KEY_MAP.get(key, key)
+            if key in _RENDERERS and plot_data.get(dk) is not None:
                 first_key = key
                 break
 
@@ -1293,7 +1429,7 @@ def qc_report(
 
         if pca_data is not None:
             pca_fig = R.render_pca(pca_data)
-            pca_fig.update_layout(height=500)
+            pca_fig.update_layout(title="" if strip_plot_title else pca_data.title, height=500)
             _compact_fig(pca_fig)
             js = "cdn" if need_plotly_cdn else False
             need_plotly_cdn = False  # only include CDN once
@@ -1302,7 +1438,7 @@ def qc_report(
 
         if umap_data is not None:
             tsne_fig = R.render_tsne(umap_data)
-            tsne_fig.update_layout(height=500)
+            tsne_fig.update_layout(title="" if strip_plot_title else umap_data.title, height=500)
             _compact_fig(tsne_fig)
             js = "cdn" if need_plotly_cdn else False
             tsne_html = tsne_fig.to_html(full_html=False, include_plotlyjs=js, default_height="500px")
@@ -1336,15 +1472,22 @@ def qc_report(
     # Find first key if not already set
     if first_key is None:
         for key in display_order:
-            if key in _RENDERERS and plot_data.get(key) is not None:
+            data_key = _DATA_KEY_MAP.get(key, key)
+            if key in _RENDERERS and plot_data.get(data_key) is not None:
                 first_key = key
                 break
 
     for key, (dtype, renderer) in _RENDERERS.items():
-        data = plot_data.get(key)
+        data_key = _DATA_KEY_MAP.get(key, key)
+        data = plot_data.get(data_key)
+        # For Olink, replace LOD-dependent plots with method-switchable panels when multiple methods exist.
+        if lod_methods and len(lod_methods) > 1 and key in {"qc_summary", "lod_analysis", "data_completeness"}:
+            continue
         if data is None or not isinstance(data, dtype):
             continue
         fig = renderer(data)  # type: ignore[operator]
+        if strip_plot_title:
+            fig.update_layout(title="")
         # Multi-panel renderers set their own height (e.g. 800px); only
         # apply the default for plots that haven't specified one.
         current_height = fig.layout.height
@@ -1354,8 +1497,62 @@ def qc_report(
         plot_height = f"{fig.layout.height}px"
         js = "cdn" if key == first_key else False
         plot_html = fig.to_html(full_html=False, include_plotlyjs=js, default_height=plot_height)
-        rendered[key] = (data.title, plot_html)  # type: ignore[attr-defined]
+        if key in _DATA_KEY_MAP:
+            title = key.replace("_", " ").title()
+        else:
+            title = getattr(data, "title", key.replace("_", " ").title())
+        rendered[key] = (title, plot_html)  # type: ignore[attr-defined]
         logger.debug("qc_report: rendered %s plot", key)
+
+    # Inject method-switchable LOD-dependent plots (Olink only)
+    if lod_methods and len(lod_methods) > 1:
+        for key in ("qc_summary", "lod_analysis", "data_completeness"):
+            parts: list[str] = []
+            need_cdn_here = key == first_key
+            for idx, (method_key, method_label) in enumerate(lod_methods):
+                lod_val = lod_by_method.get(method_key)
+                if lod_val is None:
+                    continue
+
+                if key == "qc_summary":
+                    data = compute_qc_summary(dataset, lod=lod_val)
+                    if data is None:
+                        continue
+                    fig = R.render_qc_summary(data)
+                elif key == "lod_analysis":
+                    data = compute_lod_analysis(dataset, lod=lod_val)
+                    if data is None:
+                        continue
+                    fig = R.render_lod_analysis(data)
+                else:
+                    data = compute_data_completeness(dataset, lod=lod_val)
+                    if data is None:
+                        continue
+                    fig = R.render_data_completeness(data)
+
+                current_height = fig.layout.height
+                if current_height is None:
+                    fig.update_layout(height=500)
+                _compact_fig(fig)
+                plot_height = f"{fig.layout.height}px"
+                js = "cdn" if need_cdn_here and idx == 0 else False
+                plot_html = fig.to_html(full_html=False, include_plotlyjs=js, default_height=plot_height)
+                hidden_style = ' style="display:none"'  # JS initialises visibility based on dropdown
+                parts.append(
+                    f'<div data-lod-method-panel="true" data-lod-method="{html_mod.escape(method_key)}"{hidden_style}>'
+                    f"{plot_html}"
+                    f"</div>"
+                )
+
+            if parts:
+                # Use the same titles as the default plot data, but do not bake method into headings.
+                title_map = {
+                    "qc_summary": "QC and LOD Summary",
+                    "lod_analysis": "LOD Analysis: % Samples Above LOD",
+                    "data_completeness": "Data Completeness",
+                }
+                rendered[key] = (title_map.get(key, key), "".join(parts))
+                logger.debug("qc_report: rendered %s plot (LOD-switchable: %s)", key, [m for m, _ in lod_methods])
 
     # SDRF-driven differential expression volcano plots
     if sdrf_path is not None:
@@ -1403,6 +1600,8 @@ def qc_report(
 
                 for comp_idx, (label, vdata) in enumerate(comparisons):
                     fig = R.render_volcano(vdata)
+                    if strip_plot_title:
+                        fig.update_layout(title="")
                     fig.update_layout(height=500)
                     _compact_fig(fig)
                     js_include: Any = False
@@ -1424,9 +1623,9 @@ def qc_report(
                 "".join(volcano_html_parts),
             )
 
-    # LOD source summary card (computed early for use in summary table)
+    # LOD source info (used in summary table)
     lod_info = _lod_source_info(dataset)
-    lod_card_html = _render_lod_card(lod_info)
+    lod_card_html = _render_lod_card(lod_info, lod_methods=lod_methods if lod_methods and len(lod_methods) > 1 else None)
 
     # Build grouped sections and TOC with section labels
     toc_html_parts: list[str] = []
@@ -1449,8 +1648,8 @@ def qc_report(
                 f'<div class="plot-card" id="{key}">'
                 f'<div class="plot-header">'
                 f"<h3>{title}</h3>"
-                f"{extra_header}"
                 f'<button class="help-toggle" title="How to read this plot" aria-label="Help">?</button>'
+                f"{extra_header}"
                 f"</div>"
                 f"{help_block}"
                 f"{plot_html}"
@@ -1460,12 +1659,12 @@ def qc_report(
             toc_html_parts.append(f'<div class="toc-group-label">{group_title}</div>')
             toc_html_parts.append(f"<ul>{''.join(group_toc_items)}</ul>")
             group_sections.append(f'<div class="section-group"><h2>{group_title}</h2>{"".join(cards)}</div>')
-    # Dataset Summary section (always last)
+    # Dataset Summary section (always first)
     summary_html = _render_summary_table(dataset, plot_data, lod_info)
     summary_section = f'<div class="section-group"><h2>Dataset Summary</h2>{summary_html}</div>'
-    group_sections.append(summary_section)
-    toc_html_parts.append('<div class="toc-group-label">Summary</div>')
-    toc_html_parts.append('<ul><li><a href="#dataset-summary">Dataset Summary</a></li></ul>')
+    group_sections.insert(0, summary_section)
+    toc_html_parts.insert(0, '<ul><li><a href="#dataset-summary">Dataset Summary</a></li></ul>')
+    toc_html_parts.insert(0, '<div class="toc-group-label">Summary</div>')
 
     toc_inner = "".join(toc_html_parts)
 
@@ -1510,7 +1709,6 @@ def qc_report(
         f"                {''.join(stat_items)}\n"
         f"            </div>\n"
         "        </header>\n"
-        f"        {lod_card_html}\n"
         '        <div class="pride-embedded-empty" style="display:none;text-align:center;'
         'padding:40px;color:#777;">No QC plots available for this dataset.</div>\n'
         f"        {''.join(group_sections)}\n"
@@ -1521,21 +1719,31 @@ def qc_report(
         "</body>\n</html>"
     )
 
-    output.write_text(html)
+    output.write_text(html, encoding="utf-8")
     logger.debug("qc_report: written %s (%d sections)", output, len(rendered))
     return output
 
 
-def _wrap_standalone_html(title: str, body: str, include_plotlyjs: bool = True) -> str:
+def _wrap_standalone_html(
+    title: str,
+    body: str,
+    include_plotlyjs: bool = True,
+    no_border: bool = False,
+) -> str:
     """Wrap plot HTML in a standalone page with PRIDE styling."""
     plotly_cdn = '<script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>\n' if include_plotlyjs else ""
+    border_override = (
+        "    .plot-card { border: none; box-shadow: none; }\n    .plot-card:hover { box-shadow: none; }\n"
+        if no_border
+        else ""
+    )
     return (
         f'<!DOCTYPE html>\n<html lang="en">\n<head>\n'
         f'    <meta charset="utf-8">\n'
         f'    <meta name="viewport" content="width=device-width, initial-scale=1">\n'
         f"    <title>{title}</title>\n"
         f"    {plotly_cdn}"
-        f"    <style>\n{_CSS}    </style>\n"
+        f"    <style>\n{_CSS}{border_override}    </style>\n"
         f"</head>\n<body>\n"
         f'<div style="max-width:1100px;margin:0 auto;padding:28px 36px;">\n'
         f"{body}\n"
@@ -1545,7 +1753,12 @@ def _wrap_standalone_html(title: str, body: str, include_plotlyjs: bool = True) 
     )
 
 
-def qc_report_split(dataset: AffinityDataset, output_dir: str | Path) -> Path:
+def qc_report_split(
+    dataset: AffinityDataset,
+    output_dir: str | Path,
+    no_border: bool = False,
+    strip_plot_title: bool = True,
+) -> Path:
     """Generate individual QC plot HTML files in a directory.
 
     Each plot is saved as a standalone HTML file named by its plot type
@@ -1558,6 +1771,10 @@ def qc_report_split(dataset: AffinityDataset, output_dir: str | Path) -> Path:
         The dataset to generate plots for.
     output_dir : str | Path
         Directory to write individual HTML files into. Created if it doesn't exist.
+    no_border : bool
+        If True, remove card borders and shadows from standalone plot files.
+    strip_plot_title : bool
+        Remove the Plotly figure title from each plot (default ``True``).
 
     Returns
     -------
@@ -1586,7 +1803,8 @@ def qc_report_split(dataset: AffinityDataset, output_dir: str | Path) -> Path:
         "lod_analysis": (LodAnalysisData, R.render_lod_analysis),
         "heatmap": (HeatmapData, R.render_heatmap),
         "correlation": (CorrelationData, R.render_correlation),
-        "data_completeness": (DataCompletenessData, R.render_data_completeness),
+        "sample_completeness": (DataCompletenessData, R.render_sample_completeness),
+        "missing_frequency_distribution": (DataCompletenessData, R.render_missing_frequency),
         "cv_distribution": (CvDistributionData, R.render_cv_distribution),
         "plate_cv": (PlateCvData, R.render_plate_cv),
         "norm_scale": (NormScaleData, R.render_norm_scale),
@@ -1599,23 +1817,39 @@ def qc_report_split(dataset: AffinityDataset, output_dir: str | Path) -> Path:
 
     written: list[str] = []
 
+    # Map split renderer keys to their compute_all data keys
+    _DATA_KEY_MAP = {
+        "sample_completeness": "data_completeness",
+        "missing_frequency_distribution": "data_completeness",
+    }
+
     # Render each plot as a standalone HTML file
     for key, (dtype, renderer) in _RENDERERS.items():
-        data = plot_data.get(key)
+        data_key = _DATA_KEY_MAP.get(key, key)
+        data = plot_data.get(data_key)
         if data is None or not isinstance(data, dtype):
             continue
         fig = renderer(data)  # type: ignore[operator]
+        if strip_plot_title:
+            fig.update_layout(title="")
         current_height = fig.layout.height
         if current_height is None:
             fig.update_layout(height=500)
         plot_height = f"{fig.layout.height}px"
         plot_html = fig.to_html(full_html=False, include_plotlyjs=False, default_height=plot_height)
-        title = getattr(data, "title", key.replace("_", " ").title())
+        if key in _DATA_KEY_MAP:
+            title = key.replace("_", " ").title()
+        else:
+            title = getattr(data, "title", key.replace("_", " ").title())
         help_html = _HELP_TEXT.get(key, "")
-        help_block = f'<div class="help-text open">{help_html}</div>' if help_html else ""
-        body = f'<div class="plot-card"><div class="plot-header"><h3>{title}</h3></div>{help_block}{plot_html}</div>'
-        page = _wrap_standalone_html(f"{title} — {platform_label}", body)
-        (output_dir / f"{key}.html").write_text(page)
+        help_toggle = '<button class="help-toggle" title="How to read this plot" aria-label="Help">?</button>'
+        help_block = f'<div class="help-text">{help_html}</div>' if help_html else ""
+        body = (
+            f'<div class="plot-card"><div class="plot-header"><h3>{title}</h3>'
+            f"{help_toggle}</div>{help_block}{plot_html}</div>"
+        )
+        page = _wrap_standalone_html(f"{title} — {platform_label}", body, no_border=no_border)
+        (output_dir / f"{key}.html").write_text(page, encoding="utf-8")
         written.append(key)
         logger.debug("qc_report_split: rendered %s plot", key)
 
@@ -1631,13 +1865,13 @@ def qc_report_split(dataset: AffinityDataset, output_dir: str | Path) -> Path:
 
         if pca_data is not None:
             pca_fig = R.render_pca(pca_data)
-            pca_fig.update_layout(height=500)
+            pca_fig.update_layout(title="" if strip_plot_title else pca_data.title, height=500)
             pca_html = pca_fig.to_html(full_html=False, include_plotlyjs=False, default_height="500px")
             dimred_parts.append(f'<div class="dimred-panel" id="dimred-pca">{pca_html}</div>')
 
         if umap_data is not None:
             tsne_fig = R.render_tsne(umap_data)
-            tsne_fig.update_layout(height=500)
+            tsne_fig.update_layout(title="" if strip_plot_title else umap_data.title, height=500)
             tsne_html = tsne_fig.to_html(full_html=False, include_plotlyjs=False, default_height="500px")
             hidden = ' style="display:none"' if pca_data is not None else ""
             dimred_parts.append(f'<div class="dimred-panel" id="dimred-tsne"{hidden}>{tsne_html}</div>')
@@ -1663,26 +1897,27 @@ def qc_report_split(dataset: AffinityDataset, output_dir: str | Path) -> Path:
         toggle_html += '<button class="label-toggle-btn" onclick="toggleDimRedLabels(this)">Show Labels</button>'
 
         help_text = _HELP_TEXT.get("dimreduction", "")
+        help_toggle = '<button class="help-toggle" title="How to read this plot" aria-label="Help">?</button>'
         body = (
             f'<div class="plot-card"><div class="plot-header">'
-            f"<h3>Dimensionality Reduction</h3>{toggle_html}</div>"
-            f'<div class="help-text open">{help_text}</div>'
+            f"<h3>Dimensionality Reduction</h3>{help_toggle}{toggle_html}</div>"
+            f'<div class="help-text">{help_text}</div>'
             f"{combined_html}</div>"
         )
-        page = _wrap_standalone_html(f"Dimensionality Reduction — {platform_label}", body)
-        (output_dir / "dimreduction.html").write_text(page)
+        page = _wrap_standalone_html(
+            f"Dimensionality Reduction — {platform_label}",
+            body,
+            no_border=no_border,
+        )
+        (output_dir / "dimreduction.html").write_text(page, encoding="utf-8")
         written.append("dimreduction")
 
-    # LOD sources card
-    lod_card_html = _render_lod_card(lod_info)
-    page = _wrap_standalone_html(f"LOD Sources — {platform_label}", lod_card_html, include_plotlyjs=False)
-    (output_dir / "lod_sources.html").write_text(page)
-    written.append("lod_sources")
-
-    # Summary table
+    # Summary table (includes LOD sources inline)
     summary_html = _render_summary_table(dataset, plot_data, lod_info)
-    page = _wrap_standalone_html(f"Dataset Summary — {platform_label}", summary_html, include_plotlyjs=False)
-    (output_dir / "summary.html").write_text(page)
+    page = _wrap_standalone_html(
+        f"Dataset Summary — {platform_label}", summary_html, include_plotlyjs=False, no_border=no_border
+    )
+    (output_dir / "summary.html").write_text(page, encoding="utf-8")
     written.append("summary")
 
     logger.debug("qc_report_split: written %d files to %s", len(written), output_dir)
