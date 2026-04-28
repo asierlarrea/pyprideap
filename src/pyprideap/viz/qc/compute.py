@@ -339,8 +339,17 @@ def compute_distribution(dataset: AffinityDataset) -> DistributionData:
     )
 
 
-def compute_qc_summary(dataset: AffinityDataset) -> QcLodSummaryData | None:
-    """QC status × LOD stacked bar. Falls back to simple QC counts if no LOD."""
+def compute_qc_summary(
+    dataset: AffinityDataset, *, lod: pd.DataFrame | pd.Series | None = None
+) -> QcLodSummaryData | None:
+    """QC status × LOD stacked bar. Falls back to simple QC counts if no LOD.
+
+    Parameters
+    ----------
+    lod:
+        Optional explicit LOD values to use (sample×assay DataFrame or per-assay Series).
+        When not provided, the function resolves LOD automatically (Reported → NCLOD → FixedLOD/eLOD).
+    """
     # Some Olink exports (and some PAD uploads) don't include SampleQC.
     # In that case we can still compute the overall % above/below LOD,
     # but we can't stratify by PASS/WARN/FAIL.
@@ -348,7 +357,8 @@ def compute_qc_summary(dataset: AffinityDataset) -> QcLodSummaryData | None:
 
     from pyprideap.processing.lod import _above_lod_matrix, get_lod_values
 
-    lod = get_lod_values(dataset)
+    if lod is None:
+        lod = _resolve_lod(dataset)
     numeric = dataset.expression.apply(pd.to_numeric, errors="coerce")
 
     if lod is not None and (isinstance(lod, pd.DataFrame) or len(lod) > 0):
@@ -399,10 +409,13 @@ def compute_qc_summary(dataset: AffinityDataset) -> QcLodSummaryData | None:
     return None
 
 
-def compute_lod_analysis(dataset: AffinityDataset) -> LodAnalysisData | None:
+def compute_lod_analysis(
+    dataset: AffinityDataset, *, lod: pd.DataFrame | pd.Series | None = None
+) -> LodAnalysisData | None:
     from pyprideap.processing.lod import _above_lod_matrix
 
-    lod = _resolve_lod(dataset)
+    if lod is None:
+        lod = _resolve_lod(dataset)
     if lod is None:
         return None
 
@@ -700,7 +713,9 @@ def _resolve_lod(dataset: AffinityDataset) -> pd.DataFrame | pd.Series | None:
     return None
 
 
-def compute_data_completeness(dataset: AffinityDataset) -> DataCompletenessData | None:
+def compute_data_completeness(
+    dataset: AffinityDataset, *, lod: pd.DataFrame | pd.Series | None = None
+) -> DataCompletenessData | None:
     """Per-sample completeness (above/below LOD) and per-protein missing frequency.
 
     LOD resolution priority: Reported LOD → NCLOD → FixedLOD.
@@ -744,7 +759,10 @@ def compute_data_completeness(dataset: AffinityDataset) -> DataCompletenessData 
             olink_missing_freq = mf
 
     # Resolve LOD from all available sources (use original dataset for negative controls)
-    lod = _resolve_lod(dataset)
+    # unless an explicit LOD was provided.
+    explicit_lod = lod is not None
+    if lod is None:
+        lod = _resolve_lod(dataset)
     has_lod_data = lod is not None and (isinstance(lod, pd.DataFrame) or len(lod) > 0)
 
     if not has_lod_data and olink_missing_freq is None:
@@ -783,8 +801,10 @@ def compute_data_completeness(dataset: AffinityDataset) -> DataCompletenessData 
             protein_ids.append(str(col))
             missing_freq_values.append(round(frac_below, 4))
 
-    # Override per-protein missing frequency with MissingFreq column if available
-    if olink_missing_freq is not None:
+    # Override per-protein missing frequency with MissingFreq column if available.
+    # If the caller provided an explicit LOD method, keep the plot/missing-freq
+    # consistent with that method by *not* overriding with a precomputed MissingFreq.
+    if (not explicit_lod) and olink_missing_freq is not None:
         protein_ids = [str(c) for c in numeric.columns]
         missing_freq_values = [round(float(v), 4) if pd.notna(v) else 0.0 for v in olink_missing_freq]
         # If we didn't have LOD data for per-sample rates, compute approximate

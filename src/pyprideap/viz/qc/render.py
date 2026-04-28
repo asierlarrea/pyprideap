@@ -627,33 +627,6 @@ def render_data_completeness(data: DataCompletenessData) -> Figure:
             row=2,
             col=1,
         )
-        # Percentage of proteins below 30% missing frequency (Olink-recommended threshold)
-        n_below_30 = sum(1 for f in data.missing_freq if f < 0.30)
-        pct_below_30 = n_below_30 / len(data.missing_freq) * 100 if data.missing_freq else 0
-        fig.add_annotation(
-            text=f"{pct_below_30:.1f}% of proteins below 30% missing",
-            xref="x2 domain",
-            yref="y2 domain",
-            x=0.02,
-            y=0.98,
-            xanchor="left",
-            yanchor="top",
-            showarrow=False,
-            font=dict(size=12),
-            bgcolor="rgba(255,255,255,0.8)",
-        )
-        # Olink recommended 30% missing frequency threshold
-        fig.add_vline(
-            x=30,
-            line_dash="dash",
-            line_color="#e67e22",
-            line_width=2,
-            row=2,
-            col=1,
-            annotation_text="30% threshold",
-            annotation_position="top right",
-            annotation_font_color="#e67e22",
-        )
     fig.update_xaxes(title_text="Missing Frequency (% Samples Below LOD)", range=[0, 100], row=2, col=1)
     fig.update_yaxes(title_text="Number of Proteins", row=2, col=1)
 

@@ -26,6 +26,9 @@ from pyprideap.viz.qc.compute import (
     UniProtDuplicateData,
     VolcanoData,
     compute_all,
+    compute_data_completeness,
+    compute_lod_analysis,
+    compute_qc_summary,
     compute_volcano,
 )
 
@@ -74,9 +77,8 @@ _HELP_TEXT: dict[str, str] = {
         "(orange, measured but below detection limit). A sample with a large orange fraction may "
         "indicate low protein input or technical issues. "
         "<strong>Bottom:</strong> Missing Frequency distribution — a histogram of per-protein missing rate "
-        "(%% of samples where signal is below LOD). Olink recommends a missing frequency threshold "
-        "of 30%%: proteins above this threshold may be unreliable and should be considered for filtering. "
-        "Proteins clustered near 0%% are reliably detected; those near 100%% may need filtering."
+        "(%% of samples where signal is below LOD). Proteins clustered near 0%% are reliably detected; "
+        "those near 100%% may need filtering."
     ),
     "dimreduction": (
         "Dimensionality reduction projects the high-dimensional protein expression data onto two axes. "
@@ -509,6 +511,31 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         });
     };
+    // LOD method switching (Olink only; only present when multiple LOD sources exist)
+    window.switchLodMethod = function(method) {
+        try { window.localStorage.setItem('pride-lod-method', method); } catch (e) {}
+        document.querySelectorAll('[data-lod-method-panel=\"true\"]').forEach(function(el) {
+            var m = el.getAttribute('data-lod-method');
+            el.style.display = (m === method) ? '' : 'none';
+            if (m === method) {
+                el.querySelectorAll('.plotly-graph-div').forEach(function(plotDiv) {
+                    if (plotDiv && window.Plotly) { window.Plotly.Plots.resize(plotDiv); }
+                });
+            }
+        });
+    };
+    // Initialise LOD method from saved preference (if dropdown exists)
+    var lodSelect = document.getElementById('lod-method-select');
+    if (lodSelect) {
+        var saved = null;
+        try { saved = window.localStorage.getItem('pride-lod-method'); } catch (e) {}
+        if (saved) {
+            for (var i = 0; i < lodSelect.options.length; i++) {
+                if (lodSelect.options[i].value === saved) { lodSelect.value = saved; break; }
+            }
+        }
+        window.switchLodMethod(lodSelect.value);
+    }
     // PRIDE iframe embedding
     if (window.self !== window.top) {
         document.body.classList.add('pride-embedded');
@@ -709,7 +736,7 @@ def _lod_source_info(dataset: AffinityDataset) -> dict[str, Any]:
     return info
 
 
-def _render_lod_card(lod_info: dict[str, Any]) -> str:
+def _render_lod_card(lod_info: dict[str, Any], *, lod_methods: list[tuple[str, str]] | None = None) -> str:
     """Render the LOD source summary as an HTML card.
     Use HTML entities for status icons so the output is ASCII-safe for writing with any encoding.
     """
@@ -788,8 +815,21 @@ def _render_lod_card(lod_info: dict[str, Any]) -> str:
             "LOD = median(NC) + max(0.2, 3&times;SD(NC)), following the OlinkAnalyze R package and requiring "
             "&ge;10 negative controls. "
             "<strong>FixedLOD</strong> is a pre-computed reference from Olink, specific to the reagent lot and "
-            "Data Analysis Reference ID. The report uses the first available source in the order "
-            "Reported &gt; NCLOD &gt; FixedLOD."
+            "Data Analysis Reference ID."
+        )
+
+    selector_html = ""
+    if lod_methods is not None and len(lod_methods) > 1:
+        options = "".join(
+            f'<option value="{html_mod.escape(key)}">{html_mod.escape(label)}</option>' for key, label in lod_methods
+        )
+        selector_html = (
+            '<div style="margin-top:10px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">'
+            "<label for='lod-method-select'><strong>LOD method for LOD-dependent plots:</strong></label>"
+            f"<select id='lod-method-select' onchange='switchLodMethod(this.value)'>"
+            f"{options}"
+            "</select>"
+            "</div>"
         )
 
     return (
@@ -803,6 +843,7 @@ def _render_lod_card(lod_info: dict[str, Any]) -> str:
         f"{''.join(rows)}"
         "</table>"
         f"{warning_html}"
+        f"{selector_html}"
         "</div>"
     )
 
@@ -963,34 +1004,6 @@ def _render_summary_table(
         rows.append(_summary_group("Limit of Detection"))
         if lod_active is not None:
             rows.append(_summary_row("", "LOD source", str(lod_active)))
-
-        # Match the "Missing Frequency distribution" metric (Olink-recommended 30% missing threshold):
-        # Missing frequency = fraction of samples below LOD, so <30% missing ⇔ >70% above LOD.
-        n_pass_mf = None
-        n_total_mf = None
-        if isinstance(data_completeness, DataCompletenessData) and len(data_completeness.missing_freq) > 0:
-            mf = [float(x) for x in data_completeness.missing_freq if x is not None]
-            n_total_mf = len(mf)
-            n_pass_mf = sum(1 for x in mf if x < 0.30)
-        elif isinstance(lod_analysis, LodAnalysisData) and len(lod_analysis.above_lod_pct) > 0:
-            n_total_mf = len(lod_analysis.above_lod_pct)
-            n_pass_mf = sum(1 for p in lod_analysis.above_lod_pct if float(p) > 70.0)
-
-        if n_pass_mf is not None and n_total_mf is not None and n_total_mf > 0:
-            frac_pass = n_pass_mf / n_total_mf
-            if frac_pass > 0.80:
-                lod_dot = _status_dot("green")
-            elif frac_pass >= 0.50:
-                lod_dot = _status_dot("amber")
-            else:
-                lod_dot = _status_dot("red")
-            rows.append(
-                _summary_row(
-                    lod_dot,
-                    "Assays with &lt;30% missing (MissingFreq)",
-                    f"{n_pass_mf} / {n_total_mf} ({frac_pass:.1%})",
-                )
-            )
 
     # --- Variability ---
     cv_data = plot_data.get("cv_distribution")
@@ -1266,6 +1279,39 @@ def qc_report(
     logger.debug("qc_report: starting report generation -> %s", output)
     plot_data = compute_all(dataset)
 
+    # For Olink datasets, allow switching LOD method inside a single HTML report.
+    # We render LOD-dependent plots once per available method and toggle visibility via JS.
+    lod_methods: list[tuple[str, str]] = []  # (method_key, human_label)
+    lod_by_method: dict[str, Any] = {}
+    try:
+        from pyprideap.core import Platform
+        from pyprideap.processing.lod import LodMethod, get_lod_values
+
+        if dataset.platform != Platform.SOMASCAN:
+            candidates: list[tuple[LodMethod, str]] = [
+                (LodMethod.REPORTED, "Reported LOD"),
+                (LodMethod.NCLOD, "NCLOD"),
+                (LodMethod.FIXED, "FixedLOD"),
+            ]
+            for m, label in candidates:
+                lod_val = get_lod_values(dataset, m)
+                if lod_val is None:
+                    continue
+                try:
+                    has_any = bool(lod_val.notna().any().any()) if hasattr(lod_val, "ndim") and lod_val.ndim == 2 else bool(
+                        lod_val.notna().any()
+                    )
+                except Exception:
+                    has_any = True
+                if not has_any:
+                    continue
+                lod_methods.append((m.value, label))
+                lod_by_method[m.value] = lod_val
+    except Exception:
+        # If anything goes wrong, fall back to the existing auto-resolved behaviour.
+        lod_methods = []
+        lod_by_method = {}
+
     _RENDERERS = {
         "lod_comparison": (LodComparisonData, R.render_lod_comparison),
         "distribution": (DistributionData, R.render_distribution),
@@ -1363,6 +1409,9 @@ def qc_report(
                 break
 
     for key, (dtype, renderer) in _RENDERERS.items():
+        # For Olink, replace LOD-dependent plots with method-switchable panels when multiple methods exist.
+        if lod_methods and len(lod_methods) > 1 and key in {"qc_summary", "lod_analysis", "data_completeness"}:
+            continue
         data = plot_data.get(key)
         if data is None or not isinstance(data, dtype):
             continue
@@ -1378,6 +1427,56 @@ def qc_report(
         plot_html = fig.to_html(full_html=False, include_plotlyjs=js, default_height=plot_height)
         rendered[key] = (data.title, plot_html)  # type: ignore[attr-defined]
         logger.debug("qc_report: rendered %s plot", key)
+
+    # Inject method-switchable LOD-dependent plots (Olink only)
+    if lod_methods and len(lod_methods) > 1:
+        for key in ("qc_summary", "lod_analysis", "data_completeness"):
+            parts: list[str] = []
+            need_cdn_here = key == first_key
+            for idx, (method_key, method_label) in enumerate(lod_methods):
+                lod_val = lod_by_method.get(method_key)
+                if lod_val is None:
+                    continue
+
+                if key == "qc_summary":
+                    data = compute_qc_summary(dataset, lod=lod_val)
+                    if data is None:
+                        continue
+                    fig = R.render_qc_summary(data)
+                elif key == "lod_analysis":
+                    data = compute_lod_analysis(dataset, lod=lod_val)
+                    if data is None:
+                        continue
+                    fig = R.render_lod_analysis(data)
+                else:
+                    data = compute_data_completeness(dataset, lod=lod_val)
+                    if data is None:
+                        continue
+                    fig = R.render_data_completeness(data)
+
+                current_height = fig.layout.height
+                if current_height is None:
+                    fig.update_layout(height=500)
+                _compact_fig(fig)
+                plot_height = f"{fig.layout.height}px"
+                js = "cdn" if need_cdn_here and idx == 0 else False
+                plot_html = fig.to_html(full_html=False, include_plotlyjs=js, default_height=plot_height)
+                hidden_style = ' style="display:none"'  # JS initialises visibility based on dropdown
+                parts.append(
+                    f'<div data-lod-method-panel="true" data-lod-method="{html_mod.escape(method_key)}"{hidden_style}>'
+                    f"{plot_html}"
+                    f"</div>"
+                )
+
+            if parts:
+                # Use the same titles as the default plot data, but do not bake method into headings.
+                title_map = {
+                    "qc_summary": "QC and LOD Summary",
+                    "lod_analysis": "LOD Analysis: % Samples Above LOD",
+                    "data_completeness": "Data Completeness",
+                }
+                rendered[key] = (title_map.get(key, key), "".join(parts))
+                logger.debug("qc_report: rendered %s plot (LOD-switchable: %s)", key, [m for m, _ in lod_methods])
 
     # SDRF-driven differential expression volcano plots
     if sdrf_path is not None:
@@ -1448,7 +1547,7 @@ def qc_report(
 
     # LOD source summary card (computed early for use in summary table)
     lod_info = _lod_source_info(dataset)
-    lod_card_html = _render_lod_card(lod_info)
+    lod_card_html = _render_lod_card(lod_info, lod_methods=lod_methods if lod_methods and len(lod_methods) > 1 else None)
 
     # Build grouped sections and TOC with section labels
     toc_html_parts: list[str] = []

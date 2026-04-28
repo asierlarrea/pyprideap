@@ -44,8 +44,9 @@ Issues = "https://github.com/PRIDE-Archive/pyprideap/issues"
 pyprideap = "pyprideap.cli:main"
 
 [project.optional-dependencies]
-plots = ["plotly>=5.0"]
-all = ["plotly>=5.0"]
+# kaleido 1.x requires Plotly 6.1+; keep 0.2.x for Plotly 5 static SVG/PNG export
+plots = ["plotly>=5.0", "kaleido>=0.2.1,<1"]
+all = ["plotly>=5.0", "kaleido>=0.2.1,<1"]
 dev = [
     "pytest>=7.0",
     "ruff>=0.4",
